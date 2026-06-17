@@ -1,0 +1,252 @@
+/* ==========================================================================
+   GP Dark Mode — site-specific overrides
+   Dark-mode tweaks tied to THIS site's markup and third-party widgets:
+   GeneratePress nav recolor, GenerateBlocks (gb-*) blocks, GiveWP donations,
+   Ad Inserter (code-block-*), RevContent (rc-uid-*), sbn widgets, the donate
+   sidebar, the contact tooltip, etc.
+
+   Safe to edit freely — or disable entirely from
+   Settings → GP Dark Mode → "Site overrides".
+   ========================================================================== */
+
+/* =========================
+   Contact question mark (tooltip)
+   ========================= */
+.dark-mode-contact {
+	position: relative;
+	display: inline-block;
+	cursor: pointer;
+	margin-right: 10px;
+}
+
+.dark-mode-contact::after {
+	content: attr(data-tooltip);
+	position: absolute;
+	bottom: 140%;
+	left: 50%;
+	transform: translateX(-50%) translateY(5px);
+	padding: 6px 10px;
+	font-size: 14px;
+	/*white-space: nowrap;*/
+	border-radius: 6px;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.15s ease, transform 0.15s ease;
+	z-index: 9999;
+}
+
+/* Light mode tooltip */
+html[data-theme="light"] .dark-mode-contact::after {
+	background: #111;
+	color: #fff;
+}
+
+/* Dark mode tooltip */
+html[data-theme="dark"] .dark-mode-contact::after {
+	background: #fff;
+	color: #111;
+}
+
+/* Show tooltip */
+.dark-mode-contact:hover::after,
+.dark-mode-contact:focus::after {
+	opacity: 1;
+	transform: translateX(-100%) translateY(0);
+	width: 160px;
+}
+
+/* =========================
+   Navigation (dark)
+   Border + text apply whenever dark mode is on. The accent BACKGROUND is
+   opt-in: it only applies when Settings → GP Dark Mode → "Dark nav accent"
+   is enabled, which adds the .gpdm-accent-nav class to <html>. (The original
+   shipped `background-color: var(--accent)` here, but a self-referential
+   --accent made it compute invalid, so the nav background never actually
+   changed — this preserves that default and makes the recolor a real choice.)
+   ========================= */
+html[data-theme="dark"] .main-navigation,
+html[data-theme="dark"] .main-navigation ul ul,
+html[data-theme="dark"] .main-navigation .menu-toggle {
+	border-bottom: solid 1px rgb(255 255 255 / 40%);
+	border-top: solid 1px rgb(255 255 255 / 40%);
+	color: #fff;
+}
+
+html.gpdm-accent-nav[data-theme="dark"] .main-navigation,
+html.gpdm-accent-nav[data-theme="dark"] .main-navigation ul ul,
+html.gpdm-accent-nav[data-theme="dark"] .main-navigation .menu-toggle {
+	background-color: var(--dm-accent);
+}
+
+html[data-theme="dark"] #right-sidebar a,
+html[data-theme="dark"] #right-sidebar a h4,
+html[data-theme="dark"] .homepage-right a,
+html[data-theme="dark"] .sidebar-trending .wpp-list div a {
+	color: rgb(255 255 255 / 80%) !important;
+}
+
+button:hover, html input[type="button"]:hover, input[type="reset"]:hover, input[type="submit"]:hover, a.button:hover, button:focus, html input[type="button"]:focus, input[type="reset"]:focus, input[type="submit"]:focus, a.button:focus, a.wp-block-button__link:not(.has-background):active, a.wp-block-button__link:not(.has-background):focus, a.wp-block-button__link:not(.has-background):hover {
+	color: inherit;
+	background-color: inherit !important;
+}
+
+/* lighter text color */
+html[data-theme="dark"] .main-navigation a,
+html[data-theme="dark"] .main-navigation ul ul a,
+html[data-theme="dark"] .main-navigation .main-nav ul li a,
+html[data-theme="dark"] .ff-admiral-button,
+html[data-theme="dark"] h2.gb-headline-f2ca7f03 a,
+html[data-theme="dark"] h2.gb-headline-6862e514 a,
+html[data-theme="dark"] .forminator-label,
+html[data-theme="dark"] body.single .author-box *,
+html[data-theme="dark"] body.single .choose-amount *,
+#block_94957 .title,
+.tgp-donate-sidebar-widget a,
+.right-sidebar .video-of-the-week a h4 {
+	color: var(--text) !important;
+}
+
+/* black background color */
+html[data-theme="dark"] .choose-amount .give-donation-levels-wrap .give-donation-level-btn,
+html[data-theme="dark"] .choose-amount .give-btn.advance-btn,
+html[data-theme="dark"] .sidebar .widget {
+	background-color: var(--bg);
+	box-shadow: none;
+}
+
+html[data-theme="dark"] .main-navigation .main-nav ul li:not([class*="current-menu-"]):hover > a,
+html[data-theme="dark"] .main-navigation .main-nav ul li:not([class*="current-menu-"]):focus > a,
+html[data-theme="dark"] .main-navigation .main-nav ul li.sfHover:not([class*="current-menu-"]) > a,
+html[data-theme="dark"] .main-navigation .menu-bar-item:hover > a,
+html[data-theme="dark"] .main-navigation .menu-bar-item.sfHover > a,
+html[data-theme="dark"] .main-navigation .main-nav ul li[class*="current-menu-"] > a,
+html[data-theme="dark"] .gb-container-d004d49a {
+	color: var(--text);
+	background-color: var(--bg-2);
+}
+
+html[data-theme="dark"] .gb-container-925a2a1e,
+html[data-theme="dark"] body.single .author-box,
+html[data-theme="dark"] body.single .choose-amount {
+	color: var(--text);
+	background-color: var(--bg-2);
+}
+
+html[data-theme="dark"] .entry-meta {
+	color: var(--text);
+}
+
+html[data-theme="dark"] .main-navigation .menu-bar-item > a,
+html[data-theme="dark"] .main-navigation .menu-bar-item:hover > a,
+html[data-theme="dark"] .main-navigation .menu-bar-items .search-item.active > a {
+	background-color: transparent !important;
+}
+
+/* =========================
+   Ad / widget containers (Ad Inserter, RevContent, sbn)
+   ========================= */
+.code-block div > div > div,
+.rc-feed-container,
+.right-sidebar .code-block div > div > div .sbn-widget-container,
+.right-sidebar .code-block div > div > div .rc-widget-container,
+.right-sidebar .code-block div > div > div .rc-wc {
+	/*background: #fff;*/
+	border-radius: 3px;
+}
+.right-sidebar .code-block div > div > div {
+	/*background: transparent;*/
+	/*background: #fff;*/
+	padding: 5px;
+	border-radius: 3px;
+	padding: 0;
+}
+html[data-theme="dark"] body.single .entry-content .code-block {
+	background-color: var(--bg);
+	color: var(--text);
+	box-shadow: none;
+}
+html[data-theme="dark"] .z-top-banner-yellow-bar a {
+	background: rgb(29 66 138 / 50%);
+	color: var(--text);
+}
+html[data-theme="dark"] .gb-image-b5d1d9d8 {
+	box-shadow: none;
+	border: solid 1px #555;
+}
+
+html[data-theme="dark"] .code-block-13, html[data-theme="dark"] .code-block-13 > div, html[data-theme="dark"] .code-block-13 div > div, html[data-theme="dark"] .code-block-13 div > div > div,
+html[data-theme="dark"] .code-block-17, html[data-theme="dark"] .code-block-17 > div, html[data-theme="dark"] .code-block-17 div > div, html[data-theme="dark"] .code-block-17 div > div > div,
+html[data-theme="dark"] .code-block-19, html[data-theme="dark"] .code-block-19 > div, html[data-theme="dark"] .code-block-19 div > div, html[data-theme="dark"] .code-block-19 div > div > div,
+html[data-theme="dark"] .code-block-22, html[data-theme="dark"] .code-block-22 > div, html[data-theme="dark"] .code-block-22 div > div, html[data-theme="dark"] .code-block-22 div > div > div,
+html[data-theme="dark"] .code-block-23, html[data-theme="dark"] .code-block-23 > div, html[data-theme="dark"] .code-block-23 div > div, html[data-theme="dark"] .code-block-23 div > div > div,
+html[data-theme="dark"] .code-block-24, html[data-theme="dark"] .code-block-24 > div, html[data-theme="dark"] .code-block-24 div > div, html[data-theme="dark"] .code-block-24 div > div > div,
+html[data-theme="dark"] .code-block-25, html[data-theme="dark"] .code-block-25 > div, html[data-theme="dark"] .code-block-25 div > div, html[data-theme="dark"] .code-block-25 div > div > div,
+html[data-theme="dark"] .code-block-67, html[data-theme="dark"] .code-block-67 > div, html[data-theme="dark"] .code-block-67 div > div, html[data-theme="dark"] .code-block-67 div > div > div,
+html[data-theme="dark"] .code-block-72, html[data-theme="dark"] .code-block-72 > div, html[data-theme="dark"] .code-block-72 div > div, html[data-theme="dark"] .code-block-72 div > div > div,
+html[data-theme="dark"] .homepage-ad, html[data-theme="dark"] .homepage-ad > div, html[data-theme="dark"] .homepage-ad div > div, html[data-theme="dark"] .homepage-ad div > div > div,
+html[data-theme="dark"] .home-ad-wrapper, html[data-theme="dark"] .home-ad-wrapper > div, html[data-theme="dark"] .home-ad-wrapper div > div, html[data-theme="dark"] .home-ad-wrapper div > div > div
+{
+	background: transparent !important;
+	color: #fff !important;
+	border: none !important;
+}
+
+html[data-theme="dark"] .rc-uid-275156 * h4 {
+	padding-left: 0 !important;
+	padding-right: 0 !important;
+	padding-top: 6px;
+}
+
+html[data-theme="dark"] .code-block-16 *, html[data-theme="dark"] .code-block-16 > div, html[data-theme="dark"] .code-block-16 div > div, html[data-theme="dark"] .code-block-16 div > div > div, html[data-theme="dark"] #_ruamupr_com3603 *, html[data-theme="dark"] #_ruamupr_com3600 *, html[data-theme="dark"] #_ruamupr_com3601 *,
+html[data-theme="dark"] .rc-uid-275162 .rc-headline {
+	color: #fff !important;
+	line-height: 1.2;
+	margin-top: 4px;
+	font-weight: 600;
+	font-size: 16px;
+}
+
+html[data-theme="dark"] body.home .gb-inside-container .rc-image-container {
+	box-shadow: none;
+}
+
+html[data-theme="dark"] .rc-uid-287055 .rc-headline,
+html[data-theme="dark"] .sbn-item-anchor .sbn-item-headline,
+html[data-theme="dark"] .rc-uid-275164 .rc-headline,
+html[data-theme="dark"] .rc-uid-275179 .rc-headline,
+html[data-theme="dark"] .rc-uid-275165 .rc-headline,
+html[data-theme="dark"] .rc-uid-275166 .rc-headline,
+html[data-theme="dark"] .rc-uid-275168 .rc-headline,
+html[data-theme="dark"] .entry-content .rc-headline {
+	color: #fff !important;
+}
+
+html[data-theme="dark"] .twitter-tweet.twitter-tweet-rendered { opacity: 0.9; }
+
+html[data-theme="dark"] .code-block div > div > div,
+html[data-theme="dark"] .rc-feed-container,
+html[data-theme="dark"] .right-sidebar .code-block div > div > div .sbn-widget-container,
+html[data-theme="dark"] .right-sidebar .code-block div > div > div .rc-widget-container,
+html[data-theme="dark"] .right-sidebar .code-block div > div > div .rc-wc {
+	background: transparent;
+}
+
+html[data-theme="dark"] .code-block-17 .rc-headline, html[data-theme="dark"] .code-block-17 .rc-headline a, html[data-theme="dark"] body.home .code-block-17 .rc-headline, html[data-theme="dark"] body.home .code-block-17 .rc-headline a, html[data-theme="dark"] body.home .rc-headline, html[data-theme="dark"] body.home .rc-headline a {
+	color: #fff !important;
+	font-size: inherit !important;
+	font-weight: 600;
+}
+html[data-theme="dark"] body.home .code-block-17 .rc-uid-275219 .rc-provider, html[data-theme="dark"] body.home .code-block-17 .rc-uid-275219 .rc-provider:before {
+	color: #999 !important;
+}
+
+html[data-theme="dark"] body.home .entry-content a {
+	color: rgb(255 255 255 / 70%);
+}
+
+/* =========================
+   Misc site chrome
+   ========================= */
+.gb-button-wrapper .gb-icon svg {
+	color: #fff;
+}

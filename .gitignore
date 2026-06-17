@@ -1,0 +1,11 @@
+# macOS
+.DS_Store
+
+# Editor / IDE
+.idea/
+.vscode/
+*.sublime-*
+
+# Logs / temp
+*.log
+*.tmp

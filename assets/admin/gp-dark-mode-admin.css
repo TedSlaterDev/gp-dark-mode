@@ -1,0 +1,160 @@
+/* ==========================================================================
+   GP Dark Mode — admin styles (Orchard Grove Media design system)
+   ========================================================================== */
+
+.ogm-gpdm-screen { max-width: 1120px; }
+
+/* ---------- Branded screen header ---------- */
+.ogm-gpdm-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 1rem;
+	flex-wrap: wrap;
+	margin: 1rem 0 1rem;
+}
+.ogm-gpdm-brand {
+	display: flex;
+	align-items: center;
+	gap: .85rem;
+}
+.ogm-gpdm-mark {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 46px;
+	height: 46px;
+	border-radius: 12px;
+	background: #eef4e8;
+	border: 1px solid #d7e6cc;
+	color: #4b7a3f;
+}
+.ogm-gpdm-mark .dashicons {
+	font-size: 26px;
+	width: 26px;
+	height: 26px;
+}
+.ogm-gpdm-brand-text h1 {
+	margin: 0;
+	padding: 0;
+	font-size: 1.5rem;
+	line-height: 1.2;
+}
+.ogm-gpdm-tagline {
+	margin: .15rem 0 0;
+	color: #646970;
+	font-size: .85rem;
+}
+.ogm-gpdm-version {
+	font-weight: 600;
+	font-size: .8rem;
+	color: #4b7a3f;
+	background: #eef4e8;
+	border: 1px solid #d7e6cc;
+	border-radius: 999px;
+	padding: .2rem .7rem;
+}
+
+/* ---------- Layout + cards ---------- */
+.ogm-gpdm-layout {
+	display: flex;
+	align-items: flex-start;
+	gap: 1.25rem;
+}
+.ogm-gpdm-main { flex: 1 1 auto; min-width: 0; }
+.ogm-gpdm-sidebar { flex: 0 0 280px; }
+.ogm-gpdm-card {
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 12px;
+	padding: 1.25rem 1.5rem;
+	box-shadow: 0 1px 2px rgba(0, 0, 0, .04);
+	margin: 0 0 1.25rem;
+}
+.ogm-gpdm-intro {
+	margin: 0 0 .75rem;
+	color: #646970;
+	font-size: .92rem;
+}
+
+/* Form table inside the card */
+.ogm-gpdm-card .form-table { margin-top: .25rem; }
+.ogm-gpdm-card .form-table th {
+	width: 220px;
+	font-weight: 600;
+	padding: 1rem 1rem 1rem 0;
+}
+.ogm-gpdm-card .form-table td { padding: .9rem 0; }
+.ogm-gpdm-card .form-table tr { border-top: 1px solid #f0f0f1; }
+.ogm-gpdm-card .form-table tr:first-child { border-top: none; }
+.ogm-gpdm-card .form-table select {
+	border-radius: 6px;
+}
+.ogm-gpdm-card .form-table select:focus {
+	border-color: #5b8c3e;
+	box-shadow: 0 0 0 1px #5b8c3e;
+}
+
+/* Brand-green primary button, scoped to our screen */
+.ogm-gpdm-screen .button-primary {
+	background: #5b8c3e;
+	border-color: #4b7a3f;
+	box-shadow: none;
+	text-shadow: none;
+}
+.ogm-gpdm-screen .button-primary:hover,
+.ogm-gpdm-screen .button-primary:focus {
+	background: #4b7a3f;
+	border-color: #2c4f22;
+}
+.ogm-gpdm-screen .button-primary:focus {
+	box-shadow: 0 0 0 1px #fff, 0 0 0 3px rgba(91, 140, 62, .5);
+}
+
+/* ---------- Sidebar ---------- */
+.ogm-gpdm-aside-card h2 {
+	margin: 0 0 .6rem;
+	font-size: 1rem;
+}
+.ogm-gpdm-glance {
+	margin: 0;
+	list-style: none;
+	padding: 0;
+}
+.ogm-gpdm-glance li {
+	display: flex;
+	align-items: center;
+	gap: .5rem;
+	padding: .45rem 0;
+	border-top: 1px solid #f0f0f1;
+	font-size: .9rem;
+}
+.ogm-gpdm-glance li:first-child { border-top: none; }
+.ogm-gpdm-glance .label { color: #646970; }
+.ogm-gpdm-glance .value { margin-left: auto; font-weight: 600; color: #1d2327; }
+.ogm-gpdm-dot {
+	flex: 0 0 auto;
+	width: 10px;
+	height: 10px;
+	border-radius: 50%;
+	background: #c3c4c7;
+}
+.ogm-gpdm-dot.is-on { background: #5b8c3e; }
+
+.ogm-gpdm-aside-card code {
+	background: #f6f7f7;
+	border: 1px solid #e2e2e4;
+	border-radius: 4px;
+	padding: 1px 6px;
+}
+.ogm-gpdm-aside-foot {
+	margin: .6rem 0 .4rem;
+	color: #8c8f94;
+	font-size: .8rem;
+	line-height: 1.6;
+}
+
+@media screen and (max-width: 960px) {
+	.ogm-gpdm-layout { flex-direction: column; }
+	.ogm-gpdm-sidebar { flex-basis: auto; width: 100%; }
+}

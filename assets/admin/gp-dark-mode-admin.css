@@ -154,6 +154,36 @@
 	line-height: 1.6;
 }
 
+/* ---------- Additional CSS editor ---------- */
+.ogm-gpdm-css-field { margin: 1.25rem 0 0; }
+.ogm-gpdm-subhead {
+	margin: 0 0 .25rem;
+	font-size: 1.05rem;
+}
+.ogm-gpdm-css-field textarea {
+	width: 100%;
+	height: 460px;
+	min-height: 200px;
+	resize: vertical;
+	font-family: Menlo, Consolas, Monaco, monospace;
+	font-size: 13px;
+	border-radius: 8px;
+}
+.ogm-gpdm-css-field .CodeMirror {
+	border: 1px solid #dcdcde;
+	border-radius: 8px;
+	height: 460px;
+	min-height: 200px;
+	/* Drag the bottom edge to make the editor taller; CodeMirror scrolls
+	   internally and the init script refreshes it on resize. */
+	resize: vertical;
+	overflow: hidden;
+}
+.ogm-gpdm-css-field .CodeMirror-focused {
+	border-color: #5b8c3e;
+	box-shadow: 0 0 0 1px #5b8c3e;
+}
+
 @media screen and (max-width: 960px) {
 	.ogm-gpdm-layout { flex-direction: column; }
 	.ogm-gpdm-sidebar { flex-basis: auto; width: 100%; }

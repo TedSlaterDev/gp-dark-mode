@@ -7,7 +7,9 @@
  */
 (function () {
   var html = document.documentElement;
-  var toggle = document.getElementById('dark-mode-toggle');
+  // Bind every toggle on the page (menu bar + any [gp_dark_mode_toggle]
+  // shortcodes), not just the first one by id.
+  var toggles = document.querySelectorAll('.dm-toggle');
 
   var cfg = window.ogmGpdm || {};
   var respectSystem = !!cfg.respectSystem;
@@ -96,34 +98,46 @@
     }
   }
 
+  function syncToggles(isDark) {
+    for (var i = 0; i < toggles.length; i++) {
+      toggles[i].setAttribute('aria-checked', isDark ? 'true' : 'false');
+    }
+  }
+
   function apply(theme, persist) {
     var isDark = theme === 'dark';
 
     html.setAttribute('data-theme', isDark ? 'dark' : 'light');
-    if (toggle) {
-      toggle.setAttribute('aria-checked', isDark ? 'true' : 'false');
-    }
+    syncToggles(isDark);
 
     if (persist) setPref(isDark ? 'dark' : 'light');
 
     refreshDisqusIfPresent();
   }
 
-  // Sync the button's accessible state with the theme the head script applied.
-  if (toggle) {
-    toggle.setAttribute('aria-checked', isDarkNow() ? 'true' : 'false');
+  function toggleTheme() {
+    apply(isDarkNow() ? 'light' : 'dark', true);
+  }
 
-    toggle.addEventListener('click', function () {
-      apply(isDarkNow() ? 'light' : 'dark', true);
-    });
-
-    toggle.addEventListener('keydown', function (e) {
-      var key = e.key || e.code;
-      if (key === ' ' || key === 'Spacebar' || key === 'Enter') {
-        e.preventDefault();
-        apply(isDarkNow() ? 'light' : 'dark', true);
+  // Wire each toggle once (the data flag guards against double-binding).
+  for (var t = 0; t < toggles.length; t++) {
+    (function (btn) {
+      if (btn.getAttribute('data-gpdm-bound') === '1') {
+        return;
       }
-    });
+      btn.setAttribute('data-gpdm-bound', '1');
+      btn.setAttribute('aria-checked', isDarkNow() ? 'true' : 'false');
+
+      btn.addEventListener('click', toggleTheme);
+
+      btn.addEventListener('keydown', function (e) {
+        var key = e.key || e.code;
+        if (key === ' ' || key === 'Spacebar' || key === 'Enter') {
+          e.preventDefault();
+          toggleTheme();
+        }
+      });
+    })(toggles[t]);
   }
 
   // Follow live OS theme changes — but only for visitors who haven't chosen,

@@ -3,7 +3,7 @@
  * Plugin Name:       GP Dark Mode
  * Plugin URI:        https://orchardgrove.com/
  * Description:       Robust, no-flash, accessible dark mode for the GeneratePress theme — with a menu-bar toggle, a behavior settings page, and a clean light/dark CSS-variable framework.
- * Version:           1.0.0
+ * Version:           1.0.2
  * Requires PHP:      7.4
  * Requires at least: 6.0
  * Author:            Orchard Grove Media, LLC
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OGM_GPDM_VERSION', '1.0.0' );
+define( 'OGM_GPDM_VERSION', '1.0.2' );
 define( 'OGM_GPDM_FILE', __FILE__ );
 define( 'OGM_GPDM_DIR', plugin_dir_path( __FILE__ ) );
 define( 'OGM_GPDM_URL', plugin_dir_url( __FILE__ ) );
@@ -87,7 +87,7 @@ final class OGM_GP_Dark_Mode {
 			'default_theme'       => 'light', // 'light' | 'dark'.
 			'respect_system'      => 0,        // Follow prefers-color-scheme for first-time visitors.
 			'show_toggle'         => 1,        // Render the menu-bar toggle.
-			'load_site_overrides' => 1,        // Load assets/css/site-overrides.css.
+			'enable_custom_css'   => 1,        // Output the Additional CSS field on the front end.
 			'accent_nav'          => 0,        // Recolor the dark-mode nav with the accent.
 		);
 	}
@@ -112,6 +112,32 @@ final class OGM_GP_Dark_Mode {
 		return ( 'dark' === $this->get( 'default_theme' ) ) ? 'dark' : 'light';
 	}
 
+	/**
+	 * The current Additional CSS.
+	 *
+	 * Returns the saved value once the user has saved the form (even if they
+	 * cleared it); until then it falls back to the bundled default overrides so
+	 * the field is pre-filled and the site keeps its existing styling.
+	 */
+	public function custom_css() {
+		$opts = get_option( self::OPT_KEY, array() );
+		if ( is_array( $opts ) && array_key_exists( 'custom_css', $opts ) && is_string( $opts['custom_css'] ) ) {
+			return $opts['custom_css'];
+		}
+		return self::default_custom_css();
+	}
+
+	/** Bundled default overrides — the seed for the Additional CSS field. */
+	public static function default_custom_css() {
+		static $css = null;
+		if ( null === $css ) {
+			$file = OGM_GPDM_DIR . 'assets/css/site-overrides.css';
+			// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- reading a bundled plugin asset.
+			$css = is_readable( $file ) ? (string) file_get_contents( $file ) : '';
+		}
+		return $css;
+	}
+
 	public function register_settings() {
 		register_setting(
 			self::OPT_KEY,
@@ -133,12 +159,33 @@ final class OGM_GP_Dark_Mode {
 		$theme                = isset( $in['default_theme'] ) ? sanitize_key( (string) $in['default_theme'] ) : $d['default_theme'];
 		$out['default_theme'] = in_array( $theme, array( 'light', 'dark' ), true ) ? $theme : $d['default_theme'];
 
-		$out['respect_system']      = empty( $in['respect_system'] ) ? 0 : 1;
-		$out['show_toggle']         = empty( $in['show_toggle'] ) ? 0 : 1;
-		$out['load_site_overrides'] = empty( $in['load_site_overrides'] ) ? 0 : 1;
-		$out['accent_nav']          = empty( $in['accent_nav'] ) ? 0 : 1;
+		$out['respect_system']    = empty( $in['respect_system'] ) ? 0 : 1;
+		$out['show_toggle']       = empty( $in['show_toggle'] ) ? 0 : 1;
+		$out['enable_custom_css'] = empty( $in['enable_custom_css'] ) ? 0 : 1;
+		$out['accent_nav']        = empty( $in['accent_nav'] ) ? 0 : 1;
+
+		$out['custom_css'] = isset( $in['custom_css'] ) ? self::sanitize_css( $in['custom_css'] ) : '';
 
 		return $out;
+	}
+
+	/**
+	 * Sanitize the Additional CSS.
+	 *
+	 * Strips anything that could break out of the <style> element it's printed
+	 * into (HTML tags, stray </style>/<script>), while leaving real CSS — child
+	 * combinators (>), attribute selectors, etc. — untouched. Only admins
+	 * (manage_options) can reach this field.
+	 */
+	public static function sanitize_css( $css ) {
+		$css = (string) $css;
+		// The value is only ever printed inside a <style> element (and re-shown
+		// in the admin via esc_textarea). A <style>/<script> raw-text region can
+		// only be closed by a contiguous "</style"/"</script", so stripping those
+		// sequences (case-insensitive) blocks any breakout while leaving real CSS
+		// — comments, content strings, child combinators (>), [attr] — intact.
+		$css = str_ireplace( array( '</style', '<style', '</script', '<script' ), '', $css );
+		return trim( $css );
 	}
 
 	/* ---------------------------------------------------------------------
@@ -218,7 +265,7 @@ final class OGM_GP_Dark_Mode {
 		<?php
 	}
 
-	/** Enqueue the front-end CSS framework (+ optional site overrides) and the toggle script. */
+	/** Enqueue the front-end CSS framework (+ optional inline Additional CSS) and the toggle script. */
 	public function enqueue_front_assets() {
 		// Core framework depends on GeneratePress's stylesheet so our rules win
 		// where specificity ties. (A missing dependency is simply ignored.)
@@ -229,13 +276,15 @@ final class OGM_GP_Dark_Mode {
 			OGM_GPDM_VERSION
 		);
 
-		if ( $this->get( 'load_site_overrides' ) ) {
-			wp_enqueue_style(
-				'gp-dark-mode-site',
-				OGM_GPDM_URL . 'assets/css/site-overrides.css',
-				array( 'gp-dark-mode-core' ),
-				OGM_GPDM_VERSION
-			);
+		// Additional CSS (the editable field) prints inline right after the core
+		// framework, so it overrides it and lands in the right cascade slot.
+		if ( $this->get( 'enable_custom_css' ) ) {
+			// Sanitize on output too, so even the pre-first-save bundled default
+			// can never emit a stray </style.
+			$css = self::sanitize_css( $this->custom_css() );
+			if ( '' !== $css ) {
+				wp_add_inline_style( 'gp-dark-mode-core', $css );
+			}
 		}
 
 		// Register always so the shortcode can enqueue it by handle; enqueue here
@@ -342,6 +391,25 @@ final class OGM_GP_Dark_Mode {
 			array( 'dashicons' ),
 			OGM_GPDM_VERSION
 		);
+
+		// CodeMirror CSS editor for the Additional CSS field. Returns false if
+		// the user disabled syntax highlighting in their profile — in which case
+		// the field gracefully stays a plain textarea.
+		$editor = wp_enqueue_code_editor( array( 'type' => 'text/css' ) );
+		if ( false !== $editor ) {
+			// Initialize the editor and, when the user drags it taller (CSS
+			// resize handle), refresh CodeMirror so its text area fills the new
+			// height.
+			wp_add_inline_script(
+				'code-editor',
+				'jQuery(function(){'
+					. 'if(!(window.wp&&wp.codeEditor)){return;}'
+					. 'var ed=wp.codeEditor.initialize("ogm-gpdm-custom-css",' . wp_json_encode( $editor ) . ');'
+					. 'var cm=ed&&ed.codemirror;'
+					. 'if(cm&&window.ResizeObserver){new ResizeObserver(function(){cm.refresh();}).observe(cm.getWrapperElement());}'
+				. '});'
+			);
+		}
 	}
 
 	/** True if GeneratePress (or a GeneratePress child theme) is active. */
@@ -383,7 +451,7 @@ final class OGM_GP_Dark_Mode {
 
 		// Main column.
 		echo '<div class="ogm-gpdm-main"><div class="ogm-gpdm-card">';
-		echo '<p class="ogm-gpdm-intro">' . esc_html__( 'Control how dark mode behaves for visitors. Colors live in the plugin stylesheet; these settings cover behavior only.', 'gp-dark-mode' ) . '</p>';
+		echo '<p class="ogm-gpdm-intro">' . esc_html__( 'Control how dark mode behaves for visitors, and edit this site’s additional dark-mode styles right here — no file editing required.', 'gp-dark-mode' ) . '</p>';
 
 		echo '<form method="post" action="options.php">';
 		settings_fields( self::OPT_KEY );
@@ -443,23 +511,32 @@ final class OGM_GP_Dark_Mode {
 		echo '</td>';
 		echo '</tr>';
 
-		// Site overrides.
+		// Additional CSS — enable toggle (the editor itself sits below the table).
 		echo '<tr>';
-		echo '<th scope="row">' . esc_html__( 'Site overrides', 'gp-dark-mode' ) . '</th>';
+		echo '<th scope="row">' . esc_html__( 'Additional CSS', 'gp-dark-mode' ) . '</th>';
 		echo '<td>';
-		echo '<label><input type="checkbox" name="' . esc_attr( self::OPT_KEY ) . '[load_site_overrides]" value="1" ' . checked( 1, (int) $s['load_site_overrides'], false ) . ' /> ';
-		echo esc_html__( 'Load the site-specific overrides stylesheet', 'gp-dark-mode' ) . '</label>';
-		echo '<p class="description">';
-		printf(
-			/* translators: %s: stylesheet filename. */
-			esc_html__( 'Dark-mode tweaks for this site’s third-party widgets (ads, RevContent, donations, etc.), kept separate in %s. Turn off to run the clean framework only.', 'gp-dark-mode' ),
-			'<code>assets/css/site-overrides.css</code>'
-		);
-		echo '</p>';
+		echo '<label><input type="checkbox" name="' . esc_attr( self::OPT_KEY ) . '[enable_custom_css]" value="1" ' . checked( 1, (int) $s['enable_custom_css'], false ) . ' /> ';
+		echo esc_html__( 'Output the Additional CSS below on the front end', 'gp-dark-mode' ) . '</label>';
+		echo '<p class="description">' . esc_html__( 'Turn off to run the clean framework only, without clearing your styles.', 'gp-dark-mode' ) . '</p>';
 		echo '</td>';
 		echo '</tr>';
 
 		echo '</table>';
+
+		// Additional CSS editor — full width, below the behavior table.
+		echo '<div class="ogm-gpdm-css-field">';
+		echo '<h2 class="ogm-gpdm-subhead">' . esc_html__( 'Additional CSS', 'gp-dark-mode' ) . '</h2>';
+		echo '<p class="description">' . esc_html__( 'These styles load after the core framework, in both light and dark mode — the home for this site’s third-party widget tweaks (ads, RevContent, donations, etc.). Pre-filled from the plugin’s bundled defaults until you save your own.', 'gp-dark-mode' ) . '</p>';
+		echo '<textarea id="ogm-gpdm-custom-css" class="large-text code" name="' . esc_attr( self::OPT_KEY ) . '[custom_css]" rows="20" spellcheck="false">' . esc_textarea( $this->custom_css() ) . '</textarea>';
+		echo '<p class="description">';
+		printf(
+			/* translators: %s: filename of the bundled defaults. */
+			esc_html__( 'A copy of the defaults ships in %s if you ever want to start over.', 'gp-dark-mode' ),
+			'<code>assets/css/site-overrides.css</code>'
+		);
+		echo '</p>';
+		echo '</div>';
+
 		submit_button( __( 'Save Settings', 'gp-dark-mode' ) );
 		echo '</form>';
 		echo '</div></div>'; // .ogm-gpdm-card, .ogm-gpdm-main.
@@ -505,7 +582,7 @@ final class OGM_GP_Dark_Mode {
 
 		echo '<li><span class="ogm-gpdm-dot ' . ( $s['show_toggle'] ? 'is-on' : '' ) . '"></span><span class="label">' . esc_html__( 'Menu-bar toggle', 'gp-dark-mode' ) . '</span><span class="value">' . ( $s['show_toggle'] ? esc_html__( 'Shown', 'gp-dark-mode' ) : esc_html__( 'Hidden', 'gp-dark-mode' ) ) . '</span></li>';
 
-		echo '<li><span class="ogm-gpdm-dot ' . ( $s['load_site_overrides'] ? 'is-on' : '' ) . '"></span><span class="label">' . esc_html__( 'Site overrides', 'gp-dark-mode' ) . '</span><span class="value">' . ( $s['load_site_overrides'] ? esc_html__( 'On', 'gp-dark-mode' ) : esc_html__( 'Off', 'gp-dark-mode' ) ) . '</span></li>';
+		echo '<li><span class="ogm-gpdm-dot ' . ( $s['enable_custom_css'] ? 'is-on' : '' ) . '"></span><span class="label">' . esc_html__( 'Additional CSS', 'gp-dark-mode' ) . '</span><span class="value">' . ( $s['enable_custom_css'] ? esc_html__( 'On', 'gp-dark-mode' ) : esc_html__( 'Off', 'gp-dark-mode' ) ) . '</span></li>';
 
 		echo '<li><span class="ogm-gpdm-dot ' . ( $s['accent_nav'] ? 'is-on' : '' ) . '"></span><span class="label">' . esc_html__( 'Dark nav accent', 'gp-dark-mode' ) . '</span><span class="value">' . ( $s['accent_nav'] ? esc_html__( 'On', 'gp-dark-mode' ) : esc_html__( 'Off', 'gp-dark-mode' ) ) . '</span></li>';
 

@@ -1,12 +1,15 @@
 /* ==========================================================================
-   GP Dark Mode — site-specific overrides
+   GP Dark Mode — default "Additional CSS"
+   This file is the SHIPPED DEFAULT for the Additional CSS field on the settings
+   page (Settings → GP Dark Mode). It is NOT enqueued directly — the live,
+   editable copy is stored in the plugin option and printed inline after the
+   core framework. Edit your styles in the dashboard; this file is only the
+   seed / reference you can paste back from to start over.
+
    Dark-mode tweaks tied to THIS site's markup and third-party widgets:
    GeneratePress nav recolor, GenerateBlocks (gb-*) blocks, GiveWP donations,
    Ad Inserter (code-block-*), RevContent (rc-uid-*), sbn widgets, the donate
    sidebar, the contact tooltip, etc.
-
-   Safe to edit freely — or disable entirely from
-   Settings → GP Dark Mode → "Site overrides".
    ========================================================================== */
 
 /* =========================

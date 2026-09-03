@@ -1,0 +1,56 @@
+/* ==========================================================================
+   GP Dark Mode — module: WordPress core content elements (Layer 3)
+   Dark styling for the block-editor elements every WordPress site can emit:
+   tables, code blocks, quotes, pullquotes, separators. Generic wp-block-*
+   and entry-content selectors only.
+   ========================================================================== */
+
+html[data-theme="dark"] .wp-block-table table,
+html[data-theme="dark"] .entry-content table {
+	background-color: var(--surface);
+	color: var(--text);
+	border-color: var(--border);
+}
+
+html[data-theme="dark"] .wp-block-table th,
+html[data-theme="dark"] .wp-block-table td,
+html[data-theme="dark"] .entry-content th,
+html[data-theme="dark"] .entry-content td {
+	border-color: var(--border);
+}
+
+html[data-theme="dark"] .wp-block-table thead th,
+html[data-theme="dark"] .entry-content thead th {
+	background-color: var(--surface-2);
+}
+
+html[data-theme="dark"] .wp-block-code,
+html[data-theme="dark"] .entry-content pre {
+	background-color: var(--surface-2);
+	color: var(--text);
+	border-color: var(--border);
+}
+
+html[data-theme="dark"] .wp-block-quote,
+html[data-theme="dark"] .wp-block-pullquote {
+	color: var(--text);
+	border-color: var(--border);
+}
+
+html[data-theme="dark"] .wp-block-quote cite,
+html[data-theme="dark"] .wp-block-pullquote cite {
+	color: var(--text-muted);
+}
+
+html[data-theme="dark"] .wp-block-separator,
+html[data-theme="dark"] .entry-content hr {
+	border-color: var(--border);
+	background-color: var(--border);
+}
+
+html[data-theme="dark"] .wp-block-details,
+html[data-theme="dark"] .entry-content details {
+	background-color: var(--surface);
+	color: var(--text);
+	border-color: var(--border);
+}

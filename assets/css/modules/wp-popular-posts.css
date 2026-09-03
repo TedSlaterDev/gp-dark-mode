@@ -1,0 +1,23 @@
+/* ==========================================================================
+   GP Dark Mode — module: WordPress Popular Posts (Layer 3)
+   Dark styling for the wpp-* list widgets (titles, excerpts, meta).
+   Auto-detected on activation when WordPress Popular Posts is active.
+   ========================================================================== */
+
+html[data-theme="dark"] .wpp-list li {
+	border-color: var(--border);
+}
+
+html[data-theme="dark"] .wpp-list a,
+html[data-theme="dark"] .wpp-post-title {
+	color: var(--text) !important;
+}
+
+html[data-theme="dark"] .wpp-excerpt,
+html[data-theme="dark"] .wpp-meta,
+html[data-theme="dark"] .wpp-views,
+html[data-theme="dark"] .wpp-date,
+html[data-theme="dark"] .wpp-author,
+html[data-theme="dark"] .wpp-category {
+	color: var(--text-muted);
+}

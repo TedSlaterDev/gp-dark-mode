@@ -1,0 +1,10 @@
+/* ==========================================================================
+   GP Dark Mode — module: Forminator forms (Layer 3)
+   Dark styling for Forminator's field labels (inputs themselves are covered
+   by the framework's generic form rules). Auto-detected on activation when
+   Forminator is active.
+   ========================================================================== */
+
+html[data-theme="dark"] .forminator-label {
+	color: var(--text) !important;
+}

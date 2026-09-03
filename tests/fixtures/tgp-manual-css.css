@@ -1,0 +1,229 @@
+/* ==========================================================================
+   GP Dark Mode — the reference site's Manual CSS (test fixture, NOT shipped)
+   Until 1.6.0 this file was bundled as the Manual-CSS default; the plugin
+   now ships no site-specific CSS, and this copy lives outside the ZIP. Two
+   jobs remain: (1) tests/coverage.php reads it to keep proving the 1.2.0
+   decomposition of the v1.0.3 seed lossless (framework + modules + THIS
+   residue = the old seed), and (2) it is the paste-into-Manual payload for
+   the reference site's own deployment. Contents: per-placement ad selectors
+   (.code-block-NN, .rc-uid-NNNNNN), GenerateBlocks instance hashes (gb-*),
+   and one-off page chrome.
+   ========================================================================== */
+
+/* =========================
+   Contact question mark (tooltip)
+   ========================= */
+.dark-mode-contact {
+	position: relative;
+	display: inline-block;
+	cursor: pointer;
+	margin-right: 10px;
+}
+
+.dark-mode-contact::after {
+	content: attr(data-tooltip);
+	position: absolute;
+	bottom: 140%;
+	left: 50%;
+	transform: translateX(-50%) translateY(5px);
+	padding: 6px 10px;
+	font-size: 14px;
+	/*white-space: nowrap;*/
+	border-radius: 6px;
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 0.15s ease, transform 0.15s ease;
+	z-index: 9999;
+}
+
+/* Light mode tooltip */
+html[data-theme="light"] .dark-mode-contact::after {
+	background: #111;
+	color: #fff;
+}
+
+/* Dark mode tooltip */
+html[data-theme="dark"] .dark-mode-contact::after {
+	background: #fff;
+	color: #111;
+}
+
+/* Show tooltip */
+.dark-mode-contact:hover::after,
+.dark-mode-contact:focus::after {
+	opacity: 1;
+	transform: translateX(-100%) translateY(0);
+	width: 160px;
+}
+
+/* =========================
+   Site-specific sidebar / homepage text
+   ========================= */
+html[data-theme="dark"] .homepage-right a,
+html[data-theme="dark"] .sidebar-trending .wpp-list div a {
+	color: rgb(255 255 255 / 80%) !important;
+}
+
+/* Site-wide button hover reset (verbatim from the reference site — applies
+   in BOTH modes and is deliberately un-scoped there). */
+button:hover, html input[type="button"]:hover, input[type="reset"]:hover, input[type="submit"]:hover, a.button:hover, button:focus, html input[type="button"]:focus, input[type="reset"]:focus, input[type="submit"]:focus, a.button:focus, a.wp-block-button__link:not(.has-background):active, a.wp-block-button__link:not(.has-background):focus, a.wp-block-button__link:not(.has-background):hover {
+	color: inherit;
+	background-color: inherit !important;
+}
+
+/* lighter text color (site-specific elements) */
+html[data-theme="dark"] .ff-admiral-button,
+html[data-theme="dark"] h2.gb-headline-f2ca7f03 a,
+html[data-theme="dark"] h2.gb-headline-6862e514 a,
+#block_94957 .title,
+.tgp-donate-sidebar-widget a,
+.right-sidebar .video-of-the-week a h4 {
+	color: var(--text) !important;
+}
+
+html[data-theme="dark"] .gb-container-d004d49a {
+	color: var(--text);
+	background-color: var(--bg-2);
+}
+
+html[data-theme="dark"] .gb-container-925a2a1e {
+	color: var(--text);
+	background-color: var(--bg-2);
+}
+
+/* =========================
+   Per-placement ad containers (.code-block-NN = this site's Ad Inserter
+   block numbers; .rc-uid-NNNNNN = this site's RevContent placements)
+   ========================= */
+html[data-theme="dark"] .z-top-banner-yellow-bar a {
+	background: rgb(29 66 138 / 50%);
+	color: var(--text);
+}
+html[data-theme="dark"] .gb-image-b5d1d9d8 {
+	box-shadow: none;
+	border: solid 1px #555;
+}
+
+html[data-theme="dark"] .code-block-13, html[data-theme="dark"] .code-block-13 > div, html[data-theme="dark"] .code-block-13 div > div, html[data-theme="dark"] .code-block-13 div > div > div,
+html[data-theme="dark"] .code-block-17, html[data-theme="dark"] .code-block-17 > div, html[data-theme="dark"] .code-block-17 div > div, html[data-theme="dark"] .code-block-17 div > div > div,
+html[data-theme="dark"] .code-block-19, html[data-theme="dark"] .code-block-19 > div, html[data-theme="dark"] .code-block-19 div > div, html[data-theme="dark"] .code-block-19 div > div > div,
+html[data-theme="dark"] .code-block-22, html[data-theme="dark"] .code-block-22 > div, html[data-theme="dark"] .code-block-22 div > div, html[data-theme="dark"] .code-block-22 div > div > div,
+html[data-theme="dark"] .code-block-23, html[data-theme="dark"] .code-block-23 > div, html[data-theme="dark"] .code-block-23 div > div, html[data-theme="dark"] .code-block-23 div > div > div,
+html[data-theme="dark"] .code-block-24, html[data-theme="dark"] .code-block-24 > div, html[data-theme="dark"] .code-block-24 div > div, html[data-theme="dark"] .code-block-24 div > div > div,
+html[data-theme="dark"] .code-block-25, html[data-theme="dark"] .code-block-25 > div, html[data-theme="dark"] .code-block-25 div > div, html[data-theme="dark"] .code-block-25 div > div > div,
+html[data-theme="dark"] .code-block-67, html[data-theme="dark"] .code-block-67 > div, html[data-theme="dark"] .code-block-67 div > div, html[data-theme="dark"] .code-block-67 div > div > div,
+html[data-theme="dark"] .code-block-72, html[data-theme="dark"] .code-block-72 > div, html[data-theme="dark"] .code-block-72 div > div, html[data-theme="dark"] .code-block-72 div > div > div,
+html[data-theme="dark"] .homepage-ad, html[data-theme="dark"] .homepage-ad > div, html[data-theme="dark"] .homepage-ad div > div, html[data-theme="dark"] .homepage-ad div > div > div,
+html[data-theme="dark"] .home-ad-wrapper, html[data-theme="dark"] .home-ad-wrapper > div, html[data-theme="dark"] .home-ad-wrapper div > div, html[data-theme="dark"] .home-ad-wrapper div > div > div
+{
+	background: transparent !important;
+	color: #fff !important;
+	border: none !important;
+}
+
+html[data-theme="dark"] .rc-uid-275156 * h4 {
+	padding-left: 0 !important;
+	padding-right: 0 !important;
+	padding-top: 6px;
+}
+
+html[data-theme="dark"] .code-block-16 *, html[data-theme="dark"] .code-block-16 > div, html[data-theme="dark"] .code-block-16 div > div, html[data-theme="dark"] .code-block-16 div > div > div, html[data-theme="dark"] #_ruamupr_com3603 *, html[data-theme="dark"] #_ruamupr_com3600 *, html[data-theme="dark"] #_ruamupr_com3601 *,
+html[data-theme="dark"] .rc-uid-275162 .rc-headline {
+	color: #fff !important;
+	line-height: 1.2;
+	margin-top: 4px;
+	font-weight: 600;
+	font-size: 16px;
+}
+
+html[data-theme="dark"] body.home .gb-inside-container .rc-image-container {
+	box-shadow: none;
+}
+
+html[data-theme="dark"] .rc-uid-287055 .rc-headline,
+html[data-theme="dark"] .rc-uid-275164 .rc-headline,
+html[data-theme="dark"] .rc-uid-275179 .rc-headline,
+html[data-theme="dark"] .rc-uid-275165 .rc-headline,
+html[data-theme="dark"] .rc-uid-275166 .rc-headline,
+html[data-theme="dark"] .rc-uid-275168 .rc-headline {
+	color: #fff !important;
+}
+
+html[data-theme="dark"] .code-block-17 .rc-headline, html[data-theme="dark"] .code-block-17 .rc-headline a, html[data-theme="dark"] body.home .code-block-17 .rc-headline, html[data-theme="dark"] body.home .code-block-17 .rc-headline a {
+	color: #fff !important;
+	font-size: inherit !important;
+	font-weight: 600;
+}
+html[data-theme="dark"] body.home .code-block-17 .rc-uid-275219 .rc-provider, html[data-theme="dark"] body.home .code-block-17 .rc-uid-275219 .rc-provider:before {
+	color: #999 !important;
+}
+
+html[data-theme="dark"] body.home .entry-content a {
+	color: rgb(255 255 255 / 70%);
+}
+
+/* =========================
+   Pagination (dark)
+   The broad `html[data-theme="dark"] body.home .entry-content a` rule above
+   turns the homepage's unselected page-number chips white while their
+   background stays light (--base-2 isn't redefined for dark) — white on
+   white. Re-assert the chips' intended text color. :not(:hover) keeps the
+   hover state falling through to the existing accent-blue + white styling,
+   whose rule is less specific than the broad white rule.
+   ========================= */
+html[data-theme="dark"] .latest-posts-pagination a.page-numbers:not(:hover) {
+	color: var(--contrast, #222) !important;
+}
+
+/* =========================
+   Misc site chrome
+   ========================= */
+.gb-button-wrapper .gb-icon svg {
+	color: #fff;
+}
+
+/* =========================
+   Podcast widget (added 2026-08-25)
+   The podwgt-* embed (served through Ad Inserter rotation, e.g. blocks
+   3/18) ships a light-theme creative whose "Powered by" attribution is
+   black; the unit sits directly on the dark page. Force the site's text
+   tokens. (The embed also has a theme class — podwgt-theme-light — so a
+   dark variant may exist at the embed-config level.)
+   ========================= */
+html[data-theme="dark"] .podwgt-wrapper,
+html[data-theme="dark"] .podwgt-wrapper .logo-text {
+	color: var(--text) !important;
+}
+
+/* =========================
+   Carbonatix text-to-speech player (added 2026-08-25)
+   .tts-player keeps its own light panel in dark mode but inherits the
+   framework's light --text into the player — light-on-light. Re-assert its
+   light-mode dark text. The descendant selectors are load-bearing: the
+   framework's global dark-mode p rule hits the inner paragraphs directly
+   with !important, so inheritance alone can't win.
+   ========================= */
+html[data-theme="dark"] .tts-player,
+html[data-theme="dark"] .tts-player #tts-shadow-root,
+html[data-theme="dark"] .tts-player #tts-shadow-root p,
+html[data-theme="dark"] .tts-player #tts-shadow-root span,
+html[data-theme="dark"] .tts-player #tts-shadow-root div {
+	color: #222 !important;
+}
+
+/* =========================
+   Newsletter signup widget (added 2026-08-25)
+   The widget's own embedded style paints it a GOLD brand panel with dark
+   text — correct in both modes. The framework's broad dark-mode widget
+   darkening flattens the gold, and any AI-written dark text then sits on a
+   dark box. Keep the panel gold; its dark text is right on gold.
+   ========================= */
+html[data-theme="dark"] .get-our-newsletter.widget {
+	background: #e2a702 !important;
+	border-color: #e2a702 !important;
+}
+html[data-theme="dark"] .get-our-newsletter.widget h3,
+html[data-theme="dark"] .get-our-newsletter.widget p,
+html[data-theme="dark"] .get-our-newsletter.widget label {
+	color: #1a1a1a !important;
+}

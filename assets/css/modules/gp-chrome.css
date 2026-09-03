@@ -1,0 +1,77 @@
+/* ==========================================================================
+   GP Dark Mode — module: GeneratePress chrome (Layer 3)
+   Dark styling for GeneratePress's own elements: navigation, sidebar
+   widgets, entry meta, the author box, and generic embeds. Generic GP
+   selectors only — per-site placements belong in Additional CSS (Layer 4).
+   Enabled by default; toggle under Settings → GP Dark Mode → Modules.
+   ========================================================================== */
+
+/* Navigation.
+   `var(--accent)` is verbatim from the original child-theme implementation
+   and resolves in the same cascade slot: GP's dynamic CSS defines --accent
+   after the framework's self-referential declaration, so the theme's value
+   wins (brand blue on the reference site); a theme that never defines
+   --accent computes transparent and the nav blends into the page. The
+   "Dark nav accent" setting (html.gpdm-accent-nav) overrides with the
+   plugin's own --dm-accent. */
+html[data-theme="dark"] .main-navigation,
+html[data-theme="dark"] .main-navigation ul ul,
+html[data-theme="dark"] .main-navigation .menu-toggle {
+	background-color: var(--accent);
+	border-bottom: solid 1px rgb(255 255 255 / 40%);
+	border-top: solid 1px rgb(255 255 255 / 40%);
+	color: #fff;
+}
+
+html.gpdm-accent-nav[data-theme="dark"] .main-navigation,
+html.gpdm-accent-nav[data-theme="dark"] .main-navigation ul ul,
+html.gpdm-accent-nav[data-theme="dark"] .main-navigation .menu-toggle {
+	background-color: var(--dm-accent);
+}
+
+html[data-theme="dark"] #right-sidebar a,
+html[data-theme="dark"] #right-sidebar a h4 {
+	color: rgb(255 255 255 / 80%) !important;
+}
+
+/* Lighter text. */
+html[data-theme="dark"] .main-navigation a,
+html[data-theme="dark"] .main-navigation ul ul a,
+html[data-theme="dark"] .main-navigation .main-nav ul li a,
+html[data-theme="dark"] body.single .author-box * {
+	color: var(--text) !important;
+}
+
+/* Dark surfaces. */
+html[data-theme="dark"] .sidebar .widget {
+	background-color: var(--bg);
+	box-shadow: none;
+}
+
+html[data-theme="dark"] .main-navigation .main-nav ul li:not([class*="current-menu-"]):hover > a,
+html[data-theme="dark"] .main-navigation .main-nav ul li:not([class*="current-menu-"]):focus > a,
+html[data-theme="dark"] .main-navigation .main-nav ul li.sfHover:not([class*="current-menu-"]) > a,
+html[data-theme="dark"] .main-navigation .menu-bar-item:hover > a,
+html[data-theme="dark"] .main-navigation .menu-bar-item.sfHover > a,
+html[data-theme="dark"] .main-navigation .main-nav ul li[class*="current-menu-"] > a {
+	color: var(--text);
+	background-color: var(--bg-2);
+}
+
+html[data-theme="dark"] body.single .author-box {
+	color: var(--text);
+	background-color: var(--bg-2);
+}
+
+html[data-theme="dark"] .entry-meta {
+	color: var(--text);
+}
+
+html[data-theme="dark"] .main-navigation .menu-bar-item > a,
+html[data-theme="dark"] .main-navigation .menu-bar-item:hover > a,
+html[data-theme="dark"] .main-navigation .menu-bar-items .search-item.active > a {
+	background-color: transparent !important;
+}
+
+/* Generic embeds: dim rendered tweets slightly on dark. */
+html[data-theme="dark"] .twitter-tweet.twitter-tweet-rendered { opacity: 0.9; }

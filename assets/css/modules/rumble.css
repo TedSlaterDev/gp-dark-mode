@@ -1,0 +1,28 @@
+/* ==========================================================================
+   GP Dark Mode — module: Rumble ads (Layer 3)
+   Rumble serves display units in CROSS-ORIGIN iframes (ads.rmbl.ws) inside
+   div wrappers whose ids start with "rac-ad-" (Rumble Advertising Center),
+   so no page CSS can restyle the creative itself. Many creatives draw dark
+   caption/attribution text on a TRANSPARENT background — on the dark page
+   that becomes dark-on-dark. The one lever that works from outside: give
+   the wrapper and iframe a light backing plate. Transparent creative
+   regions then render on white; creatives that paint their own background
+   simply cover it (a no-op). Script-injected — enable manually when the
+   site runs Rumble ads. (Rumble's NATIVE units are a different product:
+   they render in-DOM with sbn- and rc- prefixed classes and are covered by
+   the RevContent / sbn module.)
+
+   NOTE: never write a literal asterisk-slash sequence inside this comment —
+   it terminates the comment early and the parser's error recovery then
+   swallows the rules below AND the next module in the concatenated blob.
+   tests/unit.php guards this for every shipped CSS file.
+   ========================================================================== */
+
+html[data-theme="dark"] div[id^="rac-ad-"] {
+	background: #fff;
+}
+
+html[data-theme="dark"] iframe[src*="ads.rmbl.ws"] {
+	background: #fff;
+	border-radius: 5px;
+}

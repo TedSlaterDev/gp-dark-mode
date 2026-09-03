@@ -60,16 +60,21 @@ html[data-theme="dark"] .dark-mode-contact::after {
 
 /* =========================
    Navigation (dark)
-   Border + text apply whenever dark mode is on. The accent BACKGROUND is
-   opt-in: it only applies when Settings → GP Dark Mode → "Dark nav accent"
-   is enabled, which adds the .gpdm-accent-nav class to <html>. (The original
-   shipped `background-color: var(--accent)` here, but a self-referential
-   --accent made it compute invalid, so the nav background never actually
-   changed — this preserves that default and makes the recolor a real choice.)
+   `var(--accent)` is verbatim from the original child theme, and resolves
+   exactly as it does there because the plugin CSS occupies the same cascade
+   slot (inline on generate-style, before GP's customizer dynamic CSS):
+   GP's dynamic CSS defines --accent AFTER the framework's self-referential
+   declaration, so the theme's value wins — on thegatewaypundit.com that is
+   #1d428a, i.e. the dark nav is painted the brand blue (live-verified).
+   On a theme that never defines --accent, the self-reference is an invalid
+   cycle and this computes to transparent (the nav blends into the page).
+   The "Dark nav accent" setting (adds .gpdm-accent-nav to <html>) instead
+   paints it with the plugin's own --dm-accent, independent of the theme.
    ========================= */
 html[data-theme="dark"] .main-navigation,
 html[data-theme="dark"] .main-navigation ul ul,
 html[data-theme="dark"] .main-navigation .menu-toggle {
+	background-color: var(--accent);
 	border-bottom: solid 1px rgb(255 255 255 / 40%);
 	border-top: solid 1px rgb(255 255 255 / 40%);
 	color: #fff;
@@ -245,6 +250,19 @@ html[data-theme="dark"] body.home .code-block-17 .rc-uid-275219 .rc-provider, ht
 
 html[data-theme="dark"] body.home .entry-content a {
 	color: rgb(255 255 255 / 70%);
+}
+
+/* =========================
+   Pagination (dark)
+   The broad `html[data-theme="dark"] body.home .entry-content a` rule above
+   turns the homepage's unselected page-number chips white while their
+   background stays light (--base-2 isn't redefined for dark) — white on
+   white. Re-assert the chips' intended text color. :not(:hover) keeps the
+   hover state falling through to the existing accent-blue + white styling,
+   whose rule is less specific than the broad white rule.
+   ========================= */
+html[data-theme="dark"] .latest-posts-pagination a.page-numbers:not(:hover) {
+	color: var(--contrast, #222) !important;
 }
 
 /* =========================

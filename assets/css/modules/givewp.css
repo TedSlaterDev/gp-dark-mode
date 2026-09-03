@@ -1,0 +1,20 @@
+/* ==========================================================================
+   GP Dark Mode — module: GiveWP donations (Layer 3)
+   Dark styling for GiveWP's donation-level buttons and the .choose-amount
+   wrapper. Auto-detected on activation when GiveWP is active.
+   ========================================================================== */
+
+html[data-theme="dark"] body.single .choose-amount * {
+	color: var(--text) !important;
+}
+
+html[data-theme="dark"] .choose-amount .give-donation-levels-wrap .give-donation-level-btn,
+html[data-theme="dark"] .choose-amount .give-btn.advance-btn {
+	background-color: var(--bg);
+	box-shadow: none;
+}
+
+html[data-theme="dark"] body.single .choose-amount {
+	color: var(--text);
+	background-color: var(--bg-2);
+}

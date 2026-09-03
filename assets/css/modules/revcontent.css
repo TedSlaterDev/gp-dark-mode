@@ -1,0 +1,108 @@
+/* ==========================================================================
+   GP Dark Mode — module: RevContent / sbn widgets (Layer 3)
+   Dark styling for RevContent's and sbn's STABLE generic classes
+   (.rc-headline, .rc-feed-container, .sbn-item-headline …). Per-placement
+   selectors (.rc-uid-NNNNNN) are site-specific and belong in Additional
+   CSS (Layer 4). Script-injected vendors can't be auto-detected — enable
+   this module manually when the site runs RevContent/sbn.
+   ========================================================================== */
+
+.rc-feed-container {
+	/*background: #fff;*/
+	border-radius: 3px;
+}
+
+html[data-theme="dark"] .sbn-item-anchor .sbn-item-headline,
+html[data-theme="dark"] .entry-content .rc-headline {
+	color: #fff !important;
+}
+
+/* Widget chrome (1.6.1): section headings ("Around the Web") full light;
+   per-card attribution/brand lines muted. sbn-* units are the SAME native
+   widgets as served via Rumble's network — live DOM carries dual sbn-/rc-
+   classes on every element. */
+html[data-theme="dark"] .rc-widget-headline,
+html[data-theme="dark"] .sbn-header-headline {
+	color: #fff !important;
+}
+
+html[data-theme="dark"] .rc-provider,
+html[data-theme="dark"] .sbn-item-brand,
+html[data-theme="dark"] .rc-branding {
+	color: #999 !important;
+}
+
+/* Global white headlines (1.5.10). The historical scopes above and below
+   (.entry-content, body.home) came from the reference site's theme CSS and
+   missed real placements — e.g. below-post "Around the Web" units sit
+   outside .entry-content on non-home pages and stayed vendor-gray on the
+   dark page. With the adhesion exception codified below (its counter-rules
+   out-specify this), the safe default is: every Revcontent headline on the
+   dark page is white unless the unit carries its own light panel. */
+html[data-theme="dark"] .rc-headline,
+html[data-theme="dark"] .rc-headline a {
+	color: #fff !important;
+}
+
+html[data-theme="dark"] .rc-feed-container {
+	background: transparent;
+}
+
+/* Color ONLY — dark mode must never alter typography. The original theme
+   CSS also forced font-size: inherit + font-weight: 600 here, which made
+   headline sizing differ between modes; cut in 1.5.8. A site preferring the
+   normalized look should add it mode-independently in the Manual tab. */
+html[data-theme="dark"] body.home .rc-headline,
+html[data-theme="dark"] body.home .rc-headline a {
+	color: #fff !important;
+}
+
+/* --------------------------------------------------------------------------
+   Adhesion/floating units are the exception: Revcontent's adhesion template
+   paints its own WHITE panel (an anonymous styled-components div no stable
+   selector can reach), so the white-headline treatment above turns them
+   white-on-white. Ad Inserter pins such blocks with an INLINE
+   "position: fixed" (plus its ai-close class when the close button is on) —
+   both are selectable, and these counter-rules deliberately out-specify the
+   forcing rules above (three classes beat body.home + .rc-headline), so the
+   headlines stay dark on the light panel in dark mode.
+   ------------------------------------------------------------------------ */
+html[data-theme="dark"] .code-block.ai-close .rc-headline,
+html[data-theme="dark"] .code-block.ai-close .rc-headline a,
+html[data-theme="dark"] .code-block[style*="position: fixed"] .rc-headline,
+html[data-theme="dark"] .code-block[style*="position: fixed"] .rc-headline a,
+html[data-theme="dark"] .code-block[style*="position:fixed"] .rc-headline,
+html[data-theme="dark"] .code-block[style*="position:fixed"] .rc-headline a {
+	color: #1d1d1f !important;
+}
+
+/* Widget chrome inside adhesion units: same exception — dark heading, muted
+   dark attribution on the template's light panel. */
+html[data-theme="dark"] .code-block.ai-close .rc-widget-headline,
+html[data-theme="dark"] .code-block.ai-close .sbn-header-headline,
+html[data-theme="dark"] .code-block[style*="position: fixed"] .rc-widget-headline,
+html[data-theme="dark"] .code-block[style*="position: fixed"] .sbn-header-headline,
+html[data-theme="dark"] .code-block[style*="position:fixed"] .rc-widget-headline,
+html[data-theme="dark"] .code-block[style*="position:fixed"] .sbn-header-headline {
+	color: #1d1d1f !important;
+}
+
+html[data-theme="dark"] .code-block.ai-close .rc-provider,
+html[data-theme="dark"] .code-block.ai-close .sbn-item-brand,
+html[data-theme="dark"] .code-block.ai-close .rc-branding,
+html[data-theme="dark"] .code-block[style*="position: fixed"] .rc-provider,
+html[data-theme="dark"] .code-block[style*="position: fixed"] .sbn-item-brand,
+html[data-theme="dark"] .code-block[style*="position: fixed"] .rc-branding,
+html[data-theme="dark"] .code-block[style*="position:fixed"] .rc-provider,
+html[data-theme="dark"] .code-block[style*="position:fixed"] .sbn-item-brand,
+html[data-theme="dark"] .code-block[style*="position:fixed"] .rc-branding {
+	color: #767676 !important;
+}
+
+/* The transparent-background treatment must not reach adhesion units either:
+   their cards expect the template's light panel behind them. */
+html[data-theme="dark"] .code-block.ai-close .rc-feed-container,
+html[data-theme="dark"] .code-block[style*="position: fixed"] .rc-feed-container,
+html[data-theme="dark"] .code-block[style*="position:fixed"] .rc-feed-container {
+	background: #fff;
+}

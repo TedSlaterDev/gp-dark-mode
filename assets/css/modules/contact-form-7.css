@@ -1,0 +1,28 @@
+/* ==========================================================================
+   GP Dark Mode — module: Contact Form 7 (Layer 3)
+   Dark styling for wpcf7 forms: labels, fields, and response messages.
+   Auto-detected on activation when Contact Form 7 is active.
+   ========================================================================== */
+
+html[data-theme="dark"] .wpcf7 label,
+html[data-theme="dark"] .wpcf7 .wpcf7-quiz-label {
+	color: var(--text);
+}
+
+html[data-theme="dark"] .wpcf7 input:not([type="submit"]):not([type="button"]),
+html[data-theme="dark"] .wpcf7 textarea,
+html[data-theme="dark"] .wpcf7 select {
+	background-color: var(--surface-2);
+	color: var(--text);
+	border-color: var(--border);
+}
+
+html[data-theme="dark"] .wpcf7 .wpcf7-response-output {
+	color: var(--text);
+	border-color: var(--border);
+	background-color: var(--surface);
+}
+
+html[data-theme="dark"] .wpcf7 .wpcf7-not-valid-tip {
+	color: #e28b8b;
+}

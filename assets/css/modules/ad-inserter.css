@@ -1,0 +1,36 @@
+/* ==========================================================================
+   GP Dark Mode — module: Ad Inserter wrappers (Layer 3)
+   Dark styling for Ad Inserter's generic .code-block wrappers (the divs the
+   plugin wraps every ad placement in). Numbered placements (.code-block-13
+   …) are site-specific and belong in Additional CSS (Layer 4).
+   Auto-detected on activation when Ad Inserter is active.
+   ========================================================================== */
+
+.code-block div > div > div,
+.right-sidebar .code-block div > div > div .sbn-widget-container,
+.right-sidebar .code-block div > div > div .rc-widget-container,
+.right-sidebar .code-block div > div > div .rc-wc {
+	/*background: #fff;*/
+	border-radius: 3px;
+}
+
+.right-sidebar .code-block div > div > div {
+	/*background: transparent;*/
+	/*background: #fff;*/
+	padding: 5px;
+	border-radius: 3px;
+	padding: 0;
+}
+
+html[data-theme="dark"] body.single .entry-content .code-block {
+	background-color: var(--bg);
+	color: var(--text);
+	box-shadow: none;
+}
+
+html[data-theme="dark"] .code-block div > div > div,
+html[data-theme="dark"] .right-sidebar .code-block div > div > div .sbn-widget-container,
+html[data-theme="dark"] .right-sidebar .code-block div > div > div .rc-widget-container,
+html[data-theme="dark"] .right-sidebar .code-block div > div > div .rc-wc {
+	background: transparent;
+}

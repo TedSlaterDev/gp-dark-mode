@@ -1,0 +1,26 @@
+/* ==========================================================================
+   GP Dark Mode — module: Google AdSense wrappers (Layer 3)
+   The ad creatives render inside cross-origin iframes and cannot be styled
+   by any page CSS — this module keeps the WRAPPERS from leaving light
+   islands (default white/light backgrounds) around ads in dark mode.
+   AdSense is script-injected and can't be auto-detected — enable manually.
+   ========================================================================== */
+
+html[data-theme="dark"] ins.adsbygoogle,
+html[data-theme="dark"] .adsbygoogle {
+	background: transparent !important;
+	color: var(--text);
+}
+
+html[data-theme="dark"] .google-auto-placed {
+	background: transparent !important;
+}
+
+/* Common hand-rolled ad wrappers around AdSense units. */
+html[data-theme="dark"] .ad-container,
+html[data-theme="dark"] .ad-wrapper,
+html[data-theme="dark"] .adsense {
+	background: transparent;
+	border-color: var(--border);
+	color: var(--text-muted);
+}

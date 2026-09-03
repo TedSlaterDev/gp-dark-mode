@@ -9,3 +9,7 @@
 # Logs / temp
 *.log
 *.tmp
+
+# Test artifacts
+tests/theme/
+tests/sample-bundle.md

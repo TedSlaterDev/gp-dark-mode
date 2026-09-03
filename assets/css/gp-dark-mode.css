@@ -1,8 +1,8 @@
 /* ==========================================================================
    GP Dark Mode — core framework
    Reusable light/dark layer for GeneratePress: CSS variables, base content
-   application, forms, and the toggle component. Site-specific tweaks for
-   third-party widgets live in site-overrides.css.
+   application, forms, and the toggle component. Site-specific tweaks belong
+   in the Manual CSS tab (Layer 4b) — the plugin ships none.
 
    Edit the palette below to recolor the whole theme.
    ========================================================================== */
@@ -30,7 +30,14 @@ html.theme-init * {
 	/* Toggle accent (the track color). */
 	--dm-accent: #1d428a;
 
-	/* Only sets --accent if your theme hasn't already defined one. */
+	/* Carried over verbatim from the original site CSS. Self-referential —
+	   but NOT necessarily invalid: this sheet prints inline on generate-style
+	   BEFORE GeneratePress's customizer dynamic CSS, so when GP defines
+	   --accent (its Global Colors usually do) that later declaration wins
+	   and --accent stays valid. Only on a theme that never defines --accent
+	   does the self-reference become an invalid cycle (var(--accent) then
+	   falls back / computes to initial). The plugin's own styling uses
+	   --dm-accent and is unaffected either way. */
 	--accent: var(--accent, #1d428a);
 }
 
@@ -49,18 +56,25 @@ html[data-theme="dark"] {
 }
 
 /* =========================
-   Global application (both modes)
+   Global application (DARK MODE ONLY)
+
+   The framework must be inert in light mode: the original reference site
+   shipped these rules un-scoped ("both modes"), but in light mode the
+   !important text forcing steamrolls other sites' own styling (verified
+   live: GenerateBlocks byline colors on a featured-post panel lost to
+   `p { color: var(--text) !important }`). In dark mode the output is
+   identical to before — the variables only carry dark values there.
    ========================= */
-body {
+html[data-theme="dark"] body {
 	background-color: var(--bg) !important;
 	color: var(--text) !important;
 }
-blockquote,
-p {
+html[data-theme="dark"] blockquote,
+html[data-theme="dark"] p {
 	color: var(--text) !important;
 }
-a { color: var(--link); }
-body.single .container a { color: var(--link); }
+html[data-theme="dark"] a { color: var(--link); }
+html[data-theme="dark"] body.single .container a { color: var(--link); }
 
 html[data-theme="dark"] #disqus_thread {
 	background: var(--bg) !important;
@@ -68,20 +82,20 @@ html[data-theme="dark"] #disqus_thread {
 }
 
 /* =========================
-   Content surfaces only
+   Content surfaces (dark only)
    ========================= */
-.site-content .inside-article,
-.site-content .widget,
-.site-content .site-info {
+html[data-theme="dark"] .site-content .inside-article,
+html[data-theme="dark"] .site-content .widget,
+html[data-theme="dark"] .site-content .site-info {
 	background-color: var(--surface);
 }
 
 /* =========================
-   Forms
+   Forms (dark only)
    ========================= */
-.site-content input,
-.site-content textarea,
-.site-content select {
+html[data-theme="dark"] .site-content input,
+html[data-theme="dark"] .site-content textarea,
+html[data-theme="dark"] .site-content select {
 	background-color: var(--surface-2);
 	color: var(--text);
 	border-color: var(--border);
@@ -119,23 +133,41 @@ html[data-theme="dark"] #disqus_thread {
 	transition: box-shadow 0.3s ease-in-out;
 }
 
+/* The box-shadow transition is re-declared in each state rule on purpose:
+   the reduced-motion media query below overrides the base .dm-track
+   transition at equal specificity, so these higher-specificity state rules
+   are what actually keeps the track's fill/glow animating (as on the
+   original site). */
 .dm-track:hover {
 	box-shadow: inset 0 0 10px 5px var(--dm-accent), inset 0 0 0 20px #0056ff;
+	transition: box-shadow 0.3s ease-in-out;
 }
 
 html[data-theme="dark"] .dm-track {
 	background: var(--bg);
 	box-shadow: inset 0 0 50px #000000, inset 0 0 50px 50px #000000;
+	transition: box-shadow 0.3s ease-in-out;
 }
 
 html[data-theme="dark"] .dm-track:hover {
 	box-shadow: inset 0 0 10px 0 #000000, inset 0 0 0 20px #122666;
+	transition: box-shadow 0.3s ease-in-out;
 }
 
 .dm-icon {
 	font-size: 14px;
 	opacity: 1;
 	user-select: none;
+	/* The track is always accent-blue (light) or near-black (dark); the
+	   icons must be white on it regardless of what color the site's nav
+	   would have them inherit. */
+	color: #fff;
+}
+
+.dm-icon svg {
+	display: block;
+	width: 14px;
+	height: 14px;
 }
 
 .dm-knob {
@@ -160,7 +192,15 @@ html[data-theme="dark"] .dm-knob {
 	transform: translateX(26px);
 }
 
-/* Focus ring */
+/* Focus ring — keyboard only. Clicking must not leave a "selected" frame
+   behind: themes commonly paint button:focus outlines (or box-shadow rings)
+   that fire on mouse focus too, so suppress plain :focus on the button
+   defensively. Keyboard users still get the :focus-visible ring below. */
+.dm-toggle:focus {
+	outline: none !important;
+	box-shadow: none !important;
+}
+
 .dm-toggle:focus-visible .dm-track {
 	outline: 3px solid rgba(100, 150, 255, .55);
 	outline-offset: 2px;

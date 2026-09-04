@@ -14,7 +14,7 @@ $fixture_file = __DIR__ . '/fixtures/seed-v1.0.3.css';
 $union_files  = array_merge(
 	array(
 		$root . '/assets/css/gp-dark-mode.css',
-		$root . '/tests/fixtures/tgp-manual-css.css',
+		$root . '/tests/fixtures/theme-manual-css.css',
 	),
 	glob( $root . '/assets/css/modules/*.css' )
 );

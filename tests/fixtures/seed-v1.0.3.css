@@ -64,8 +64,8 @@ html[data-theme="dark"] .dark-mode-contact::after {
    exactly as it does there because the plugin CSS occupies the same cascade
    slot (inline on generate-style, before GP's customizer dynamic CSS):
    GP's dynamic CSS defines --accent AFTER the framework's self-referential
-   declaration, so the theme's value wins — on thegatewaypundit.com that is
-   #1d428a, i.e. the dark nav is painted the brand blue (live-verified).
+   declaration, so the theme's value wins — on a site whose theme defines
+   --accent, the dark nav is painted that theme's brand colour (live-verified).
    On a theme that never defines --accent, the self-reference is an invalid
    cycle and this computes to transparent (the nav blends into the page).
    The "Dark nav accent" setting (adds .gpdm-accent-nav to <html>) instead

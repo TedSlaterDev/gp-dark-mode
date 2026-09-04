@@ -261,7 +261,7 @@ final class OGM_GP_Dark_Mode {
 	 *   slim residue slice — its rules were reference-site-specific and no
 	 *   such install exists outside the reference site, whose own deploy
 	 *   pastes the residue into Manual. tests/coverage.php still proves the
-	 *   decomposition against tests/fixtures/tgp-manual-css.css.)
+	 *   decomposition against tests/fixtures/theme-manual-css.css.)
 	 * - Saved installs already carry the complete old rules (with any edits
 	 *   or deletions) in their Additional CSS, so ALL modules stay off —
 	 *   turning any on (even gp-chrome) could resurrect rules the admin
@@ -387,7 +387,7 @@ final class OGM_GP_Dark_Mode {
 	 * Returns the saved value, or '' when nothing was ever saved. Since 1.6.0
 	 * the plugin ships NO site-specific CSS: Manual starts empty and only the
 	 * site owner writes to it. (The reference site's old residue lives on in
-	 * tests/fixtures/tgp-manual-css.css, outside the ZIP.)
+	 * tests/fixtures/theme-manual-css.css, outside the ZIP.)
 	 */
 	public function custom_css() {
 		$opts = get_option( self::OPT_KEY, array() );

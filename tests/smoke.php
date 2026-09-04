@@ -155,7 +155,7 @@ function wp_remote_get( $url, $args = array() ) {
 	return array( 'code' => 404, 'body' => '' );
 }
 
-// ---- fixtures: a child theme (real TGP functions.php when available) ----
+// ---- fixtures: a child theme (a real child theme's functions.php when available) ----
 @mkdir( $FIXTURES, 0777, true );
 $real_fn = '/Users/ted/Desktop/dark-mode/functions.php';
 if ( is_readable( $real_fn ) ) {
@@ -330,7 +330,7 @@ check( 'layers: full order framework < generated < module < additional', false !
 $sanitized = $plugin->sanitize_settings( array( 'default_theme' => 'dark', 'modules' => array( 'givewp' => '1' ) ) );
 check( 'sanitize: no generated_css key in settings', ! array_key_exists( 'generated_css', $sanitized ) );
 
-// The seed-fallback landmine (found live on TGP staging, 1.5.9): real WP
+// The seed-fallback landmine (found live on a staging site, 1.5.9): real WP
 // re-enters this sanitizer on EVERY update_option/add_option of OPT_KEY —
 // activation seeding and migrations pass arrays with no custom_css field.
 // That must never materialize custom_css as '' (which silently retires the

@@ -82,7 +82,7 @@ check( '@import statement not misparsed as selector', false === strpos( $out, '@
 
 // Real file: the reference site's Manual-CSS residue (a fixture since 1.6.0 —
 // the plugin no longer ships site-specific CSS).
-$real    = file_get_contents( __DIR__ . '/fixtures/tgp-manual-css.css' );
+$real    = file_get_contents( __DIR__ . '/fixtures/theme-manual-css.css' );
 $realOut = OGM_GPDM_Bundle::extract_color_css( $real );
 check( 'site-overrides: pagination rule kept', false !== strpos( $realOut, ':not(:hover)' ) );
 check( 'site-overrides: reduced substantially', strlen( $realOut ) < strlen( $real ) );
@@ -140,14 +140,14 @@ $fixture = '/Users/ted/Desktop/dark-mode/functions.php';
 if ( is_readable( $fixture ) ) {
 	$fn = file_get_contents( $fixture );
 	if ( preg_match( '~<<<CSS(.*?)\nCSS;~s', $fn, $m ) ) {
-		$tgpOut = OGM_GPDM_Bundle::extract_color_css( $m[1] );
-		check( 'TGP heredoc: parses without fatal, non-empty', strlen( $tgpOut ) > 1000 );
-		check( 'TGP heredoc: dark vars kept', false !== strpos( $tgpOut, '--bg: #0f0f12' ) );
-		check( 'TGP heredoc: dm-track box-shadow kept', false !== strpos( $tgpOut, '.dm-track' ) );
-		echo 'TGP heredoc: ' . strlen( $m[1] ) . ' bytes -> ' . strlen( $tgpOut ) . " bytes\n";
+		$manualOut = OGM_GPDM_Bundle::extract_color_css( $m[1] );
+		check( 'Manual CSS heredoc: parses without fatal, non-empty', strlen( $manualOut ) > 1000 );
+		check( 'Manual CSS heredoc: dark vars kept', false !== strpos( $manualOut, '--bg: #0f0f12' ) );
+		check( 'Manual CSS heredoc: dm-track box-shadow kept', false !== strpos( $manualOut, '.dm-track' ) );
+		echo 'Manual CSS heredoc: ' . strlen( $m[1] ) . ' bytes -> ' . strlen( $manualOut ) . " bytes\n";
 	}
 } else {
-	echo "(TGP functions.php fixture not present — heredoc checks skipped)\n";
+	echo "(child-theme functions.php fixture not present — heredoc checks skipped)\n";
 }
 
 // Nested CSS (modern nesting) — best-effort wrapper retention.
@@ -236,7 +236,7 @@ check( 'palette: light surface goes dark', null !== $surface && $s_hsl[2] < 0.25
 $text = OGM_GPDM_Palette::derive_dark( '#222222', 'contrast' );
 check( 'palette: dark text goes light + meets 4.5:1', null !== $text && OGM_GPDM_Palette::contrast_ratio( $text, OGM_GPDM_Palette::DARK_REF ) >= 4.5 );
 
-// TGP's accent (#1d428a) sits below 3:1 on the dark ref — must be lightened.
+// A representative brand accent (#1d428a) sits below 3:1 on the dark ref — must be lightened.
 $brand = OGM_GPDM_Palette::derive_dark( '#1d428a', 'accent' );
 check( 'palette: too-dark brand color lightened to >= 3:1', null !== $brand && OGM_GPDM_Palette::contrast_ratio( $brand, OGM_GPDM_Palette::DARK_REF ) >= 3 );
 

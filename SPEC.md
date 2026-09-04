@@ -46,7 +46,7 @@ themes fall back to a late standalone stylesheet.
 | 2 | Generated palette | option `ogm_gpdm_generated_css` (GEN_KEY, autoloaded) | `enable_generated` (default 0 — opt-in, review first) | `OGM_GPDM_Palette::generate()`: GP Global Colors → RANK-BASED dark ramps (never naive inversion — it collapses GP's near-white surface ramp). Surfaces: lightest→darkest, L = 0.07 + 0.045·rank. Text tiers: 0.92 − 0.10·rank with WCAG floors (4.5:1 primary, 3:1 others). Classification is USAGE-AWARE: `usage_roles()` reads where each color is actually used (GP settings values holding `var(--slug)` or the literal hex, keyed background→surface / text·title·link→text; plus `background*: var(--slug)` / `color: var(--slug)` in Customizer CSS and child style.css) and real usage overrides the slug-name guess — slug names lie (live case: a dark site header painted with `var(--contrast)`). Conflicting usage (both roles) → left unchanged with a note; utility and brand classes are exempt from overrides. Already-light text, ALREADY-DARK surfaces (L ≤ 0.32 — mirror rule; inverting them would lighten a deliberately dark header/footer), `white`/`black` utility slugs, and readable brand colors (≥3:1) stay untouched; too-dark brands are lightened to 3:1. Saturated colors in text slots keep hue strength (s cap 0.55 when s ≥ 0.40). `rgb()/rgba()` parsed; unparseable/unclassified colors are listed in output comments, never silently dropped. |
 | 3 | Integration modules | `assets/css/modules/*.css` | `modules[slug]` checkboxes | Registry in `OGM_GP_Dark_Mode::modules()`: gp-chrome (default on), revcontent (manual — script-injected, undetectable), ad-inserter / givewp / forminator (auto-detected ON at fresh activation only). Written against vendors' STABLE generic selectors; per-placement selectors belong in Layer 4b. Plugin-versioned: fixes ship to every site. |
 | 4a | AI stylesheet | option `ogm_gpdm_ai_css` (autoloaded) | `enable_ai_css` (default 1) | Machine-owned. Each accepted proposal replaces it wholesale. Backup/swap (`ogm_gpdm_ai_backup`) operates on THIS layer only. |
-| 4b | Manual CSS | setting `custom_css` | `enable_custom_css` (default 1) | The owner's layer. Loads LAST, always wins, never touched by the AI. Starts EMPTY — since 1.6.0 the plugin ships no site-specific CSS; the reference site's old residue is a test fixture (`tests/fixtures/tgp-manual-css.css`), pasted into that site's own Manual tab at deploy. |
+| 4b | Manual CSS | setting `custom_css` | `enable_custom_css` (default 1) | The owner's layer. Loads LAST, always wins, never touched by the AI. Starts EMPTY — since 1.6.0 the plugin ships no site-specific CSS; the reference site's old residue is a test fixture (`tests/fixtures/theme-manual-css.css`), pasted into that site's own Manual tab at deploy. |
 
 `tests/coverage.php` proves the 1.2.0 decomposition was lossless: all 341
 selector+declaration pairs of the pre-split seed exist in the union of
@@ -182,7 +182,7 @@ auto-reloads (it would destroy unsaved form edits) — it offers a link.
   untouched, status lifecycle, key semantics.
 
 Every confirmed finding from an adversarial review round gets a regression
-test named for it. The optional TGP reference fixture at
+test named for it. The optional child-theme reference fixture at
 `~/Desktop/dark-mode/` deepens two suites when present.
 
 ## 10. File map
@@ -194,7 +194,7 @@ includes/class-ogm-gpdm-palette.php  Layer-2 generated palette (color math)
 includes/class-ogm-gpdm-ai.php       BYOK AI review (providers, models, proposal lifecycle)
 assets/css/gp-dark-mode.css          Layer 1 framework
 assets/css/modules/*.css             Layer 3 integration modules
-tests/fixtures/tgp-manual-css.css    reference-site residue (fixture, not shipped)
+tests/fixtures/theme-manual-css.css    reference-site residue (fixture, not shipped)
 assets/js/dark-mode-toggle.js        Front-end toggle behavior
 assets/admin/gp-dark-mode-admin.*    Settings-page CSS/JS (tabs, models, review polling)
 tests/                               run.sh + unit/coverage/smoke + fixtures

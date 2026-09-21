@@ -98,8 +98,57 @@ foreach ( $fixture as $sel => $decls ) {
 	}
 }
 
+// Print-time minification must be lossless: for every shipped CSS file the
+// rule map is identical after OGM_GPDM_CSS::minify() (compared with all
+// whitespace removed, since the minifier's only job is whitespace), and every
+// quoted string survives byte-for-byte (which the whitespace-blind compare
+// alone could not prove).
+// The include has WordPress's ABSPATH guard, which calls exit() — silently,
+// with status 0 — when the constant is missing. Define it first or this whole
+// script dies here looking like a pass.
+if ( ! defined( 'ABSPATH' ) ) {
+	define( 'ABSPATH', '/tmp/' );
+}
+require_once $root . '/includes/class-ogm-gpdm-css.php';
+
+/** Whitespace-blind copy of a rules_map(), for raw-vs-minified comparison. */
+function canon_map( array $map ) {
+	$out = array();
+	foreach ( $map as $sel => $decls ) {
+		$out[ preg_replace( '~\s+~', '', $sel ) ] = array_map(
+			function ( $d ) {
+				return preg_replace( '~\s+~', '', $d );
+			},
+			$decls
+		);
+	}
+	return $out;
+}
+
+$string_re = '~"(?:[^"\\\\]|\\\\.)*"|\'(?:[^\'\\\\]|\\\\.)*\'~';
+$min_fail  = array();
+foreach ( $union_files as $file ) {
+	$raw = file_get_contents( $file );
+	$min = OGM_GPDM_CSS::minify( $raw );
+	if ( canon_map( rules_map( $raw ) ) !== canon_map( rules_map( $min ) ) ) {
+		$min_fail[] = basename( $file ) . ' (rule map differs after minify)';
+	}
+	preg_match_all( $string_re, preg_replace( '~/\*.*?\*/~s', '', $raw ), $raw_strings );
+	preg_match_all( $string_re, $min, $min_strings );
+	if ( $raw_strings[0] !== $min_strings[0] ) {
+		$min_fail[] = basename( $file ) . ' (a quoted string changed)';
+	}
+}
+if ( ! empty( $min_fail ) ) {
+	echo "FAIL: minification is NOT lossless:\n";
+	foreach ( $min_fail as $f ) {
+		echo "  - $f\n";
+	}
+	exit( 1 );
+}
+
 if ( empty( $missing ) ) {
-	echo 'PASS: all ' . $checked . ' selector+declaration pairs from the v1.0.3 seed are present in the framework + modules + new seed union (' . count( $union_files ) . ' files)' . ( $waived ? ', ' . $waived . ' documented intentional divergence(s) waived' : '' ) . ".\n";
+	echo 'PASS: all ' . $checked . ' selector+declaration pairs from the v1.0.3 seed are present in the framework + modules + new seed union (' . count( $union_files ) . ' files)' . ( $waived ? ', ' . $waived . ' documented intentional divergence(s) waived' : '' ) . '; minify lossless across all ' . count( $union_files ) . " files.\n";
 	exit( 0 );
 }
 

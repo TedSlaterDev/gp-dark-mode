@@ -4,7 +4,7 @@ Tags: dark mode, generatepress, dark theme, toggle, color scheme
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.6.5
+Stable tag: 1.6.7
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -89,6 +89,13 @@ your own site (loopback requests); that step sends nothing to any third
 party.
 
 == Changelog ==
+
+= 1.6.7 =
+* Fixed: findings from the official WordPress.org Plugin Check tool — the AI Context Bundle no longer passes `suppress_filters => true` to `get_posts()` (prohibited by the plugin-repo ruleset), and the two display-only notice reads now carry their nonce-exemption annotation on the exact line that reads the query value. Plugin Check now reports zero errors; the remaining notes are advisories about direct AI-provider integration, which is deliberate (bring-your-own-key) and disclosed under External services.
+
+= 1.6.6 =
+* Improved: the CSS the plugin prints on every page is now minified at output time — comments and whitespace only, so the rules are unchanged (the test suite proves the minified output parses to the identical rule set). The shipped layers drop by about half; after compression, roughly two-thirds. Source files stay readable, and the inline output stays readable too under `SCRIPT_DEBUG` or the `ogm_gpdm_minify_css` filter.
+* Fixed: the toggle button's `id` is now unique when GeneratePress renders the menu bar twice (desktop plus the hidden mobile copy); the first instance keeps `dark-mode-toggle`, later copies are suffixed. Style the toggle via the `.dm-toggle` class.
 
 = 1.6.5 =
 * Changed: display name is now **Dark Mode for GeneratePress** (the folder, slug, and settings all stay `gp-dark-mode`) in line with WordPress.org naming guidelines.

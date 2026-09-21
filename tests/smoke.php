@@ -8,6 +8,9 @@ error_reporting( E_ALL );
 
 define( 'ABSPATH', '/tmp/' );
 define( 'MINUTE_IN_SECONDS', 60 );
+// The layer-order checks below locate layers by their header comments, so
+// run the front-end assembly unminified (the minifier has its own tests).
+define( 'SCRIPT_DEBUG', true );
 
 $FIXTURES = __DIR__ . '/theme';
 

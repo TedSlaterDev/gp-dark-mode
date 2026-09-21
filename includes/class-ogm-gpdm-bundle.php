@@ -210,7 +210,7 @@ final class OGM_GPDM_Bundle {
 			array(
 				'numberposts'      => 1,
 				'post_status'      => 'publish',
-				'suppress_filters' => true,
+				'suppress_filters' => false,
 			)
 		);
 		if ( ! empty( $recent ) ) {

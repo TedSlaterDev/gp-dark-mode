@@ -3,7 +3,7 @@
  * Plugin Name:       Dark Mode for GeneratePress
  * Plugin URI:        https://gpdarkmode.com/
  * Description:       Robust, no-flash, accessible dark mode for the GeneratePress theme — with a menu-bar toggle, a behavior settings page, and a clean light/dark CSS-variable framework.
- * Version:           1.6.5
+ * Version:           1.6.7
  * Requires PHP:      7.4
  * Requires at least: 6.0
  * Author:            Orchard Grove Media, LLC
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OGM_GPDM_VERSION', '1.6.5' );
+define( 'OGM_GPDM_VERSION', '1.6.7' );
 define( 'OGM_GPDM_FILE', __FILE__ );
 define( 'OGM_GPDM_DIR', plugin_dir_path( __FILE__ ) );
 define( 'OGM_GPDM_URL', plugin_dir_url( __FILE__ ) );
@@ -618,6 +618,17 @@ final class OGM_GP_Dark_Mode {
 
 		$css = self::framework_css() . $extra;
 
+		// Print-time minification (comments + whitespace only; the rule set is
+		// unchanged — tests/coverage.php proves it). Bypassed under
+		// SCRIPT_DEBUG or via the filter so inline output stays readable when
+		// debugging a site.
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-css.php';
+		$minify = apply_filters( 'ogm_gpdm_minify_css', ! ( defined( 'SCRIPT_DEBUG' ) && SCRIPT_DEBUG ) );
+		if ( $minify ) {
+			$css   = OGM_GPDM_CSS::minify( $css );
+			$extra = OGM_GPDM_CSS::minify( $extra );
+		}
+
 		if ( wp_style_is( 'generate-style', 'enqueued' ) ) {
 			// Same cascade slot as the original child-theme implementation:
 			// inline on GeneratePress's parent stylesheet, attached at
@@ -682,7 +693,15 @@ final class OGM_GP_Dark_Mode {
 			. '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>'
 			. '</svg>';
 
-		$html  = '<button id="dark-mode-toggle" class="dm-toggle" type="button" role="switch"';
+		// GeneratePress renders its menu bar twice (desktop + the hidden mobile
+		// copy), so a fixed id would be duplicated — invalid HTML. The first
+		// instance keeps the historical id; later copies get a suffix. The
+		// toggle script binds by class, never by id.
+		static $instance = 0;
+		$instance++;
+		$id = ( 1 === $instance ) ? 'dark-mode-toggle' : 'dark-mode-toggle-' . $instance;
+
+		$html  = '<button id="' . esc_attr( $id ) . '" class="dm-toggle" type="button" role="switch"';
 		$html .= ' aria-label="' . $label . '" aria-checked="' . esc_attr( $checked ) . '">';
 		$html .= '<span class="dm-track" aria-hidden="true">';
 		$html .= '<span class="dm-icon dm-sun" aria-hidden="true">' . $sun_svg . '</span>';
@@ -851,15 +870,19 @@ final class OGM_GP_Dark_Mode {
 		$this->render_header();
 		settings_errors();
 
-		if ( isset( $_GET['gpdm-generated'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only notice after the nonce-checked redirect.
-			if ( 'empty' === $_GET['gpdm-generated'] ) {
+		// Display-only notices after nonce-checked redirects: each query value is
+		// reduced to a fixed key and only ever selects a message to show.
+		$generated_code = isset( $_GET['gpdm-generated'] ) ? sanitize_key( (string) wp_unslash( $_GET['gpdm-generated'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only notice after the nonce-checked redirect.
+		if ( '' !== $generated_code ) {
+			if ( 'empty' === $generated_code ) {
 				echo '<div class="notice notice-warning is-dismissible"><p>' . esc_html__( 'No usable GeneratePress Global Colors found — nothing was generated.', 'gp-dark-mode' ) . '</p></div>';
 			} else {
 				echo '<div class="notice notice-success is-dismissible"><p>' . esc_html__( 'Dark palette generated. Review it below, then tick “Output the generated palette” and save.', 'gp-dark-mode' ) . '</p></div>';
 			}
 		}
 
-		if ( isset( $_GET['gpdm-ai'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only notice after the nonce-checked redirect.
+		$ai_code = isset( $_GET['gpdm-ai'] ) ? sanitize_key( (string) wp_unslash( $_GET['gpdm-ai'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- display-only notice after the nonce-checked redirect.
+		if ( '' !== $ai_code ) {
 			// Fixed codes only — free text in the query string trips WAFs.
 			$ai_notices = array(
 				'applied'     => array( 'notice-success', __( 'Proposal applied as the AI stylesheet. The previous AI stylesheet is backed up — use the swap button to undo. Your Manual CSS was not touched.', 'gp-dark-mode' ) ),
@@ -869,7 +892,6 @@ final class OGM_GP_Dark_Mode {
 				'no-backup'   => array( 'notice-error', __( 'No backup to swap in.', 'gp-dark-mode' ) ),
 				'reset'       => array( 'notice-success', __( 'All settings were reset to factory defaults. Auto-detected modules were re-enabled, and the Manual CSS is back on the bundled defaults.', 'gp-dark-mode' ) ),
 			);
-			$ai_code    = sanitize_key( (string) wp_unslash( $_GET['gpdm-ai'] ) );
 			if ( isset( $ai_notices[ $ai_code ] ) ) {
 				echo '<div class="notice ' . esc_attr( $ai_notices[ $ai_code ][0] ) . ' is-dismissible"><p>' . esc_html( $ai_notices[ $ai_code ][1] ) . '</p></div>';
 			}

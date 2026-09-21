@@ -7,6 +7,7 @@ define( 'ABSPATH', '/tmp/' );
 require dirname( __DIR__ ) . '/includes/class-ogm-gpdm-bundle.php';
 require dirname( __DIR__ ) . '/includes/class-ogm-gpdm-palette.php';
 require dirname( __DIR__ ) . '/includes/class-ogm-gpdm-ai.php';
+require dirname( __DIR__ ) . '/includes/class-ogm-gpdm-css.php';
 
 $pass = 0;
 $fail = 0;
@@ -134,6 +135,22 @@ $fw = file_get_contents( dirname( __DIR__ ) . '/assets/css/gp-dark-mode.css' );
 check( 'framework: global text rule is dark-scoped', false !== strpos( $fw, 'html[data-theme="dark"] blockquote' ) );
 check( 'framework: no unscoped body/p/blockquote globals', ! preg_match( '~^(?:body|blockquote|p|a)\s*[,{]~m', $fw ) );
 check( 'framework: surfaces + forms dark-scoped', false !== strpos( $fw, 'html[data-theme="dark"] .site-content input' ) && ! preg_match( '~^\.site-content~m', $fw ) );
+
+// ---- OGM_GPDM_CSS::minify (print-time; comments + whitespace only) ----
+$m = OGM_GPDM_CSS::minify( "/* gone */\nhtml[data-theme=\"dark\"] .code-block[style*=\"position: fixed\"] .rc-headline ,\n .x > .y {\n\tcolor: #fff !important;\n\tbackground: rgba(1, 2, 3, .5);\n}\n" );
+check( 'minify: comments removed', false === strpos( $m, '/*' ) );
+check( 'minify: quoted attribute string preserved verbatim', false !== strpos( $m, '[style*="position: fixed"]' ) );
+check( 'minify: structural whitespace removed', false !== strpos( $m, '.rc-headline,.x>.y{color:#fff !important;background:rgba(1,2,3,.5)}' ) );
+check( 'minify: descendant-vs-pseudo space kept', 'a :hover{color:red}' === OGM_GPDM_CSS::minify( "a :hover { color: red; }" ) );
+check( 'minify: pseudo-class untouched', 'a:hover{color:red}' === OGM_GPDM_CSS::minify( "a:hover { color: red; }" ) );
+check( 'minify: calc operators keep their spaces', '.a{width:calc(100% - 10px)}' === OGM_GPDM_CSS::minify( ".a { width: calc(100% - 10px); }" ) );
+check( 'minify: media query', '@media (max-width:768px){.a{display:none}}' === OGM_GPDM_CSS::minify( "@media (max-width: 768px) {\n  .a { display: none; }\n}" ) );
+check( 'minify: content string with spaces and braces survives', ".a::before{content:\"a ; } b\"}" === OGM_GPDM_CSS::minify( ".a::before { content: \"a ; } b\"; }" ) );
+check( 'minify: unterminated comment left alone (no crash)', is_string( OGM_GPDM_CSS::minify( '.a{color:red} /* open' ) ) );
+check( 'minify: empty in, empty out', '' === OGM_GPDM_CSS::minify( "  \n " ) );
+$fw_min = OGM_GPDM_CSS::minify( $fw );
+check( 'minify: framework shrinks by >40%', strlen( $fw_min ) < strlen( $fw ) * 0.6 );
+echo 'minify: framework ' . strlen( $fw ) . ' bytes -> ' . strlen( $fw_min ) . " bytes\n";
 
 // Optional fixture: a real child-theme functions.php with a CSS heredoc.
 $fixture = '/Users/ted/Desktop/dark-mode/functions.php';

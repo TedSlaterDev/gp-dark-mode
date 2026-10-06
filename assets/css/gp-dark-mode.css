@@ -107,6 +107,10 @@ html[data-theme="dark"] .site-content select {
 .dm-toggle {
 	background: none;
 	border: 0;
+	/* Themes commonly paint button:hover/:focus backgrounds; a radius on the
+	   button itself keeps any such paint pill-shaped like the track instead
+	   of a rectangle peeking out behind it. */
+	border-radius: 20px;
 	cursor: pointer;
 	padding: 0;
 	margin: 0 2px 0 10px;

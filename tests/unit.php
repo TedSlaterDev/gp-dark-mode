@@ -377,6 +377,21 @@ $ranked = OGM_GPDM_AI::rank_openai_models( array( 'gpt-4o', 'gpt-4o-2024-05-13',
 check( 'rank openai: gpt-5 first', 'gpt-5' === $ranked[0] );
 check( 'rank openai: dated snapshot collapsed into family head', in_array( 'gpt-4o', $ranked, true ) && ! in_array( 'gpt-4o-2024-05-13', $ranked, true ) );
 
+// Families the code has never seen must rank by version, not fall to a floor.
+$ranked = OGM_GPDM_AI::rank_openai_models( array( 'gpt-3.5-turbo', 'o3', 'gpt-4o', 'gpt-6-luna', 'gpt-5.1', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-5-mini', 'o4-mini', 'gpt-4.5-preview' ) );
+check( 'rank openai: unseen newer major ranks first', 'gpt-6.1-sol' === $ranked[0] && 'gpt-6-astra' === $ranked[1] );
+check( 'rank openai: gpt-6 family > gpt-5.1 > o-series', array_search( 'gpt-6-luna', $ranked, true ) < array_search( 'gpt-5.1', $ranked, true ) && array_search( 'gpt-5.1', $ranked, true ) < array_search( 'o3', $ranked, true ) );
+check( 'rank openai: mini variants below their flagship', array_search( 'gpt-5.1', $ranked, true ) < array_search( 'gpt-5-mini', $ranked, true ) );
+
+// ---- effort resolution (settings value -> per-provider API value) ----
+check( 'effort: default is medium on both providers', 'medium' === OGM_GPDM_AI::effort_for( 'anthropic', 'claude-opus-5', '' ) && 'medium' === OGM_GPDM_AI::effort_for( 'openai', 'gpt-5.1', '' ) );
+check( 'effort: max passes through on Claude 5', 'max' === OGM_GPDM_AI::effort_for( 'anthropic', 'claude-fable-5', 'max' ) );
+check( 'effort: max capped to high on gpt-5.x and o-series', 'high' === OGM_GPDM_AI::effort_for( 'openai', 'gpt-5.1', 'max' ) && 'high' === OGM_GPDM_AI::effort_for( 'openai', 'o3', 'max' ) );
+check( 'effort: max passes through on gpt-6+', 'max' === OGM_GPDM_AI::effort_for( 'openai', 'gpt-6-astra', 'max' ) );
+check( 'effort: omitted for models that take none', null === OGM_GPDM_AI::effort_for( 'openai', 'gpt-4o', 'high' ) && null === OGM_GPDM_AI::effort_for( 'anthropic', 'claude-haiku-4-5', 'high' ) );
+check( 'effort: bogus setting falls back to medium', 'medium' === OGM_GPDM_AI::effort_for( 'anthropic', 'claude-opus-5', 'turbo' ) );
+check( 'effort: timeouts scale and stay inside the run window', 120 === OGM_GPDM_AI::effort_timeout( 'low' ) && 180 === OGM_GPDM_AI::effort_timeout( 'medium' ) && 420 === OGM_GPDM_AI::effort_timeout( 'high' ) && 840 === OGM_GPDM_AI::effort_timeout( 'max' ) && OGM_GPDM_AI::effort_timeout( 'max' ) < OGM_GPDM_AI::RUN_TIMEOUT );
+
 check( 'seed models: defaults lead each list', 'claude-opus-5' === OGM_GPDM_AI::seed_models( 'anthropic' )[0] && 'gpt-5' === OGM_GPDM_AI::seed_models( 'openai' )[0] );
 
 check( 'ai: prose-only response rejected', null === OGM_GPDM_AI::extract_css( 'I could not find any problems worth fixing.' ) );

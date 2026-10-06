@@ -125,7 +125,19 @@ final class OGM_GPDM_AI {
 	/** Default model for a provider. */
 	public static function default_model( $provider ) {
 		$providers = self::providers();
-		return isset( $providers[ $provider ] ) ? $providers[ $provider ]['default_model'] : 'claude-opus-5';
+		$fallback  = isset( $providers[ $provider ] ) ? $providers[ $provider ]['default_model'] : 'claude-opus-5';
+		// OpenAI ships new flagship families often; once a refresh has run, the
+		// top of the ranked cache IS the current lineup's newest model, so
+		// "Provider default" tracks it instead of a hardcoded id that goes
+		// stale. Anthropic's default stays pinned to Opus (the ranked top can
+		// be a restricted tier).
+		if ( 'openai' === $provider ) {
+			$ids = self::models_cache( 'openai' )['ids'];
+			if ( ! empty( $ids ) ) {
+				return (string) $ids[0];
+			}
+		}
+		return $fallback;
 	}
 
 	/* ---------------------------------------------------------------------
@@ -355,57 +367,27 @@ final class OGM_GPDM_AI {
 	 * @return string[]
 	 */
 	public static function rank_openai_models( array $ids ) {
+		// Version-aware: newer GPT major.minor families rank first, so a lineup
+		// this code has never heard of (gpt-6-*, gpt-7…) lands at the top —
+		// the old fixed table gave anything unrecognized a floor score below
+		// gpt-3.5, which buried new families and pushed them off the cap.
 		$score_for = function ( $id ) {
-			$id = strtolower( $id );
-			if ( preg_match( '/^o4(?!-mini)/', $id ) ) {
-				return 105;
+			$id    = strtolower( $id );
+			$score = 1000;
+			if ( preg_match( '/^gpt-(\d+)(?:\.(\d+))?/', $id, $m ) ) {
+				$score = 1000 + 100 * (int) $m[1] + 10 * (int) ( isset( $m[2] ) ? $m[2] : 0 );
+			} elseif ( preg_match( '/^o(\d+)/', $id, $m ) ) {
+				$score = 1470 + 5 * (int) $m[1]; // o1…o4 sit below gpt-5, above gpt-4.x.
+			} elseif ( 0 === strpos( $id, 'chatgpt-' ) ) {
+				$score = 1300;
 			}
-			if ( preg_match( '/^o3(?!-mini)/', $id ) ) {
-				return 100;
+			if ( false !== strpos( $id, '-mini' ) ) {
+				$score -= 50;
 			}
-			if ( preg_match( '/^o1(?!-mini)/', $id ) ) {
-				return 90;
+			if ( false !== strpos( $id, '-nano' ) ) {
+				$score -= 60;
 			}
-			if ( preg_match( '/^o4-mini/', $id ) ) {
-				return 72;
-			}
-			if ( preg_match( '/^o3-mini/', $id ) ) {
-				return 70;
-			}
-			if ( preg_match( '/^o1-mini/', $id ) ) {
-				return 65;
-			}
-			if ( 0 === strpos( $id, 'gpt-5' ) ) {
-				return 95;
-			}
-			if ( 0 === strpos( $id, 'gpt-4.5' ) ) {
-				return 85;
-			}
-			if ( 0 === strpos( $id, 'gpt-4.1-mini' ) ) {
-				return 58;
-			}
-			if ( 0 === strpos( $id, 'gpt-4.1' ) ) {
-				return 82;
-			}
-			if ( 0 === strpos( $id, 'gpt-4o-mini' ) ) {
-				return 55;
-			}
-			if ( 0 === strpos( $id, 'gpt-4o' ) ) {
-				return 80;
-			}
-			if ( 0 === strpos( $id, 'gpt-4-turbo' ) ) {
-				return 75;
-			}
-			if ( 0 === strpos( $id, 'gpt-4' ) ) {
-				return 60;
-			}
-			if ( 0 === strpos( $id, 'gpt-3.5' ) ) {
-				return 40;
-			}
-			if ( 0 === strpos( $id, 'chatgpt-' ) ) {
-				return 50;
-			}
-			return 30;
+			return $score;
 		};
 
 		$variant_penalty = function ( $id ) {
@@ -550,9 +532,11 @@ final class OGM_GPDM_AI {
 		$system = self::build_system_prompt();
 		$user   = self::build_user_prompt( $bundle, $instructions );
 
+		$effort = self::effort_for( $provider, $model, isset( $settings['ai_effort'] ) ? (string) $settings['ai_effort'] : '' );
+
 		$text = ( 'openai' === $provider )
-			? self::call_openai( $key, $model, $system, $user )
-			: self::call_anthropic( $key, $model, $system, $user );
+			? self::call_openai( $key, $model, $system, $user, $effort )
+			: self::call_anthropic( $key, $model, $system, $user, $effort );
 
 		if ( is_wp_error( $text ) ) {
 			return $text;
@@ -583,13 +567,62 @@ final class OGM_GPDM_AI {
 		return true;
 	}
 
+	/**
+	 * Resolve the effort value to send for this provider + model, or null when
+	 * the model takes none. '' (the setting's default) means medium on both
+	 * providers. Claude 5-family models accept low…max as-is; OpenAI reasoning
+	 * models accept the same names from gpt-6 up, while gpt-5.x and the
+	 * o-series top out at high — so Max is capped there instead of sent and
+	 * rejected. The ogm_gpdm_ai_effort filter still gets the last word.
+	 */
+	public static function effort_for( $provider, $model, $setting ) {
+		$setting = in_array( $setting, array( 'low', 'medium', 'high', 'max' ), true ) ? $setting : 'medium';
+		$model   = strtolower( (string) $model );
+		if ( 'openai' === $provider ) {
+			if ( preg_match( '/^gpt-(\d+)/', $model, $m ) && (int) $m[1] >= 6 ) {
+				$effort = $setting;
+			} elseif ( preg_match( '/^(o\d|gpt-5)/', $model ) ) {
+				$effort = ( 'max' === $setting ) ? 'high' : $setting;
+			} else {
+				return null;
+			}
+		} else {
+			if ( ! preg_match( '/^claude-(fable|opus-5|opus-4-[6-8]|sonnet-5|sonnet-4-6)/', $model ) ) {
+				return null;
+			}
+			$effort = $setting;
+		}
+		if ( function_exists( 'apply_filters' ) ) {
+			$filtered = apply_filters( 'ogm_gpdm_ai_effort', $effort, $provider, $model );
+			if ( in_array( $filtered, array( 'low', 'medium', 'high', 'xhigh', 'max' ), true ) ) {
+				$effort = $filtered;
+			}
+		}
+		return $effort;
+	}
+
+	/** HTTP timeout (seconds) for one provider call, scaled with effort; always inside RUN_TIMEOUT. */
+	public static function effort_timeout( $effort ) {
+		switch ( $effort ) {
+			case 'low':
+				return 120;
+			case 'high':
+				return 420;
+			case 'xhigh':
+			case 'max':
+				return 840;
+			default:
+				return 180;
+		}
+	}
+
 	/** The response token budget (filterable — see the truncation errors). */
 	private static function max_tokens() {
 		return max( 4000, (int) apply_filters( 'ogm_gpdm_ai_max_tokens', 16000 ) );
 	}
 
 	/** Call the Anthropic Messages API. Returns response text or WP_Error. */
-	private static function call_anthropic( $key, $model, $system, $user ) {
+	private static function call_anthropic( $key, $model, $system, $user, $effort = null ) {
 		$body = array(
 			'model'      => $model,
 			'max_tokens' => self::max_tokens(),
@@ -614,13 +647,8 @@ final class OGM_GPDM_AI {
 			$headers['anthropic-beta'] = 'server-side-fallback-2026-07-01';
 			$body['fallbacks']         = 'default';
 
-			/**
-			 * Reasoning effort for the review. 'medium' keeps a single web
-			 * request comfortably inside shared-hosting time limits; raise to
-			 * 'high' if your host allows long requests.
-			 */
-			$effort = apply_filters( 'ogm_gpdm_ai_effort', 'medium' );
-			if ( in_array( $effort, array( 'low', 'medium', 'high', 'xhigh', 'max' ), true ) ) {
+			// Reasoning effort, resolved by effort_for() from the Effort setting.
+			if ( null !== $effort ) {
 				$body['output_config'] = array( 'effort' => $effort );
 			}
 		}
@@ -628,7 +656,7 @@ final class OGM_GPDM_AI {
 		$res = wp_remote_post(
 			self::ANTHROPIC_URL,
 			array(
-				'timeout' => 180,
+				'timeout' => self::effort_timeout( $effort ),
 				'headers' => $headers,
 				'body'    => wp_json_encode( $body ),
 			)
@@ -672,7 +700,7 @@ final class OGM_GPDM_AI {
 	}
 
 	/** Call the OpenAI Chat Completions API. Returns response text or WP_Error. */
-	private static function call_openai( $key, $model, $system, $user ) {
+	private static function call_openai( $key, $model, $system, $user, $effort = null ) {
 		$body = array(
 			'model'                 => $model,
 			'max_completion_tokens' => self::max_tokens(),
@@ -682,16 +710,16 @@ final class OGM_GPDM_AI {
 			),
 		);
 
-		// Reasoning models: low effort keeps the request fast (same choice
-		// Editorial QA ships for o*/gpt-5).
-		if ( preg_match( '~^(o[0-9]|gpt-5)~', $model ) ) {
-			$body['reasoning_effort'] = 'low';
+		// Reasoning effort, resolved by effort_for() (medium by default; omitted
+		// for models that take none, such as gpt-4o).
+		if ( null !== $effort ) {
+			$body['reasoning_effort'] = $effort;
 		}
 
 		$res = wp_remote_post(
 			self::OPENAI_URL,
 			array(
-				'timeout' => 180,
+				'timeout' => self::effort_timeout( $effort ),
 				'headers' => array(
 					'content-type'  => 'application/json',
 					'authorization' => 'Bearer ' . $key,

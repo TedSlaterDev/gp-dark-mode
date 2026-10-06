@@ -4,7 +4,7 @@ Tags: dark mode, generatepress, dark theme, toggle, color scheme
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.6.7
+Stable tag: 1.6.9
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -34,7 +34,7 @@ GP Dark Mode adds a polished light/dark experience to GeneratePress:
 * Integration modules (Layer 3): per-vendor checkboxes with auto-detection badges
 * AI stylesheet (Layer 4a): the reviewer's layer — enable/disable, diff, apply, swap back
 * Manual CSS editor (Layer 4b: enable/disable + edit your styles in the dashboard — loads last, always wins)
-* AI Assist: provider (Anthropic/OpenAI), model, API key — plus the Run AI Review flow with diff, Apply, Discard, Restore
+* AI Assist: provider (Anthropic/OpenAI), model, effort (Low / Medium / High / Max), API key — plus the Run AI Review flow with diff, Apply, Discard, Restore
 * AI Context Bundle download
 
 == Installation ==
@@ -89,6 +89,13 @@ your own site (loopback requests); that step sends nothing to any third
 party.
 
 == Changelog ==
+
+= 1.6.9 =
+* Fixed: the toggle button now carries a 20px border radius, so a theme's own button hover/focus background follows the pill shape instead of showing as a rectangle behind the track.
+
+= 1.6.8 =
+* New: an **Effort** setting beside the model picker — Default (medium), Low, High, or Max — controlling how much reasoning the provider spends on a review. Previously fixed at medium for Claude and low for OpenAI; now medium on both by default. Request timeouts scale with the choice and the background worker lifts PHP's time limit where the host allows it, so a long Max run can finish instead of timing out. Models that take no effort setting ignore it; on OpenAI models below gpt-6 and the o-series, Max is sent as High.
+* Fixed: "Refresh models" buried OpenAI families the plugin had never heard of — the ranking scored anything unrecognized below gpt-3.5, so newer lineups (gpt-6 and later) fell off the end of the list. Ranking is now version-aware: the newest major.minor families come first, mini/nano variants below their flagships, and the effort parameter is sent to every reasoning model from gpt-5 up.
 
 = 1.6.7 =
 * Fixed: findings from the official WordPress.org Plugin Check tool — the AI Context Bundle no longer passes `suppress_filters => true` to `get_posts()` (prohibited by the plugin-repo ruleset), and the two display-only notice reads now carry their nonce-exemption annotation on the exact line that reads the query value. Plugin Check now reports zero errors; the remaining notes are advisories about direct AI-provider integration, which is deliberate (bring-your-own-key) and disclosed under External services.

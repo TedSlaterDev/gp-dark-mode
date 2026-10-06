@@ -332,6 +332,7 @@ check( 'layers: full order framework < generated < module < additional', false !
 // (it lives in GEN_KEY), and unchecked module boxes sanitize to 0.
 $sanitized = $plugin->sanitize_settings( array( 'default_theme' => 'dark', 'modules' => array( 'givewp' => '1' ) ) );
 check( 'sanitize: no generated_css key in settings', ! array_key_exists( 'generated_css', $sanitized ) );
+check( 'sanitize: ai_effort allowlisted', 'max' === $plugin->sanitize_settings( array( 'ai_effort' => 'max' ) )['ai_effort'] && '' === $plugin->sanitize_settings( array( 'ai_effort' => 'turbo' ) )['ai_effort'] );
 
 // The seed-fallback landmine (found live on a staging site, 1.5.9): real WP
 // re-enters this sanitizer on EVERY update_option/add_option of OPT_KEY —
@@ -432,8 +433,20 @@ $prop   = OGM_GPDM_AI::proposal();
 check( 'ai openai: review succeeds + proposal stored', true === $result && null !== $prop && false !== strpos( $prop['css'], '.oa-test' ) );
 $req  = $GLOBALS['ai_requests'][0];
 $body = json_decode( $req['args']['body'], true );
-check( 'ai openai: endpoint + default model + low effort', false !== strpos( $req['url'], 'api.openai.com' ) && 'gpt-5' === $body['model'] && 'low' === $body['reasoning_effort'] );
+check( 'ai openai: endpoint + default model + medium effort default', false !== strpos( $req['url'], 'api.openai.com' ) && 'gpt-5' === $body['model'] && 'medium' === $body['reasoning_effort'] && 180 === $req['args']['timeout'] );
 check( 'ai openai: bearer auth', 'Bearer sk-oa' === $req['args']['headers']['authorization'] );
+
+// The Effort setting flows through: Max is capped to high on gpt-5 (the
+// o-series/gpt-5.x ceiling) and the HTTP timeout scales with it.
+$GLOBALS['wp_options']['ogm_gpdm_settings']['ai_effort'] = 'max';
+reset_settings_cache( $plugin );
+$GLOBALS['ai_requests'] = array();
+OGM_GPDM_AI::run_review( $plugin );
+$req2  = $GLOBALS['ai_requests'][0];
+$body2 = json_decode( $req2['args']['body'], true );
+check( 'ai openai: Max effort capped to high on gpt-5 + scaled timeout', 'high' === $body2['reasoning_effort'] && 420 === $req2['args']['timeout'] );
+unset( $GLOBALS['wp_options']['ogm_gpdm_settings']['ai_effort'] );
+reset_settings_cache( $plugin );
 
 // Apply / restore lifecycle — v1.5.0: the AI layer (4a), Manual untouched.
 $GLOBALS['wp_options']['ogm_gpdm_settings'] = array( 'ai_provider' => 'openai', 'ai_api_key_openai' => 'sk-oa', 'custom_css' => '.manual-css {}' );

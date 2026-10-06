@@ -199,7 +199,7 @@ jQuery( function ( $ ) {
 
 	function aiPoll() {
 		aiPollCount++;
-		if ( aiPollCount > 60 ) { // ~5 minutes of polling, then give up quietly.
+		if ( aiPollCount > 180 ) { // ~15 minutes — matches the server-side run window; High/Max effort can take a while.
 			aiProgressStop();
 			aiStatusEl().text( 'Still running — reload this page in a minute to check for the proposal.' );
 			return;

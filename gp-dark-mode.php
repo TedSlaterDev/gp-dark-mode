@@ -3,7 +3,7 @@
  * Plugin Name:       Dark Mode for GeneratePress
  * Plugin URI:        https://gpdarkmode.com/
  * Description:       Robust, no-flash, accessible dark mode for the GeneratePress theme — with a menu-bar toggle, a behavior settings page, and a clean light/dark CSS-variable framework.
- * Version:           1.6.7
+ * Version:           1.6.9
  * Requires PHP:      7.4
  * Requires at least: 6.0
  * Author:            Orchard Grove Media, LLC
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OGM_GPDM_VERSION', '1.6.7' );
+define( 'OGM_GPDM_VERSION', '1.6.9' );
 define( 'OGM_GPDM_FILE', __FILE__ );
 define( 'OGM_GPDM_DIR', plugin_dir_path( __FILE__ ) );
 define( 'OGM_GPDM_URL', plugin_dir_url( __FILE__ ) );
@@ -352,6 +352,7 @@ final class OGM_GP_Dark_Mode {
 			'ai_api_key_anthropic' => '',      // Keys are stored PER PROVIDER so a
 			'ai_api_key_openai'    => '',      // saved key is never sent to the other one.
 			'ai_model'            => '',       // Empty = the provider's default model.
+			'ai_effort'           => '',       // Empty = medium; low | medium | high | max.
 		);
 	}
 
@@ -444,6 +445,8 @@ final class OGM_GP_Dark_Mode {
 		$provider           = isset( $in['ai_provider'] ) ? sanitize_key( (string) $in['ai_provider'] ) : $d['ai_provider'];
 		$out['ai_provider'] = in_array( $provider, array( 'anthropic', 'openai' ), true ) ? $provider : $d['ai_provider'];
 		$out['ai_model']    = isset( $in['ai_model'] ) ? sanitize_text_field( (string) $in['ai_model'] ) : '';
+		$effort             = isset( $in['ai_effort'] ) ? sanitize_key( (string) $in['ai_effort'] ) : '';
+		$out['ai_effort']   = in_array( $effort, array( 'low', 'medium', 'high', 'max' ), true ) ? $effort : '';
 
 		// Per-provider key fields. Each renders the mask when a key is saved;
 		// submitting the mask unchanged (or an empty field) keeps the stored
@@ -1119,6 +1122,20 @@ final class OGM_GP_Dark_Mode {
 		}
 		echo '</select></label> ';
 
+		echo '<label>' . esc_html__( 'Effort', 'gp-dark-mode' ) . ' ';
+		echo '<select id="ogm-gpdm-ai-effort" name="' . esc_attr( self::OPT_KEY ) . '[ai_effort]">';
+		$effort_labels = array(
+			''       => __( 'Default (medium)', 'gp-dark-mode' ),
+			'low'    => __( 'Low — fastest', 'gp-dark-mode' ),
+			'medium' => __( 'Medium', 'gp-dark-mode' ),
+			'high'   => __( 'High — slower, deeper', 'gp-dark-mode' ),
+			'max'    => __( 'Max — can take several minutes', 'gp-dark-mode' ),
+		);
+		foreach ( $effort_labels as $ekey => $elabel ) {
+			echo '<option value="' . esc_attr( $ekey ) . '"' . selected( $s['ai_effort'], $ekey, false ) . '>' . esc_html( $elabel ) . '</option>';
+		}
+		echo '</select></label> ';
+
 		// type=button so pressing Enter in a field saves settings instead of refreshing.
 		echo '<button type="button" class="button" id="ogm-gpdm-refresh-models">' . esc_html__( 'Refresh models', 'gp-dark-mode' ) . '</button> ';
 		echo '<span id="ogm-gpdm-refresh-status" aria-live="polite"></span></p>';
@@ -1130,6 +1147,7 @@ final class OGM_GP_Dark_Mode {
 		} else {
 			echo '<p class="description">' . esc_html__( 'Showing a default list. Save the API key, then click Refresh models to pull the provider’s current lineup.', 'gp-dark-mode' ) . '</p>';
 		}
+		echo '<p class="description">' . esc_html__( 'Effort sets how much reasoning the model spends on the review: higher is more thorough and slower (Max can take several minutes on the largest models). Models that take no effort setting ignore it; OpenAI models below gpt-6 and the o-series top out at High, so Max is sent as High there.', 'gp-dark-mode' ) . '</p>';
 
 		// One key row per provider — only the selected provider's row shows
 		// (JS toggles on switch; server-side style covers no-JS). Keys are
@@ -1373,6 +1391,15 @@ final class OGM_GP_Dark_Mode {
 	/** Cron callback: execute the review and record the outcome. */
 	public function run_ai_review_cron() {
 		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-ai.php';
+
+		// High/Max effort calls can run for many minutes; give the worker the
+		// full run window where the host allows it.
+		if ( function_exists( 'ignore_user_abort' ) ) {
+			ignore_user_abort( true );
+		}
+		if ( function_exists( 'set_time_limit' ) ) {
+			set_time_limit( OGM_GPDM_AI::RUN_TIMEOUT + 60 );
+		}
 
 		$result = OGM_GPDM_AI::run_review( $this );
 

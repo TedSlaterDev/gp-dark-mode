@@ -3,7 +3,7 @@
  * Plugin Name:       Dark Mode for GeneratePress
  * Plugin URI:        https://gpdarkmode.com/
  * Description:       Robust, no-flash, accessible dark mode for the GeneratePress theme — with a menu-bar toggle, a behavior settings page, and a clean light/dark CSS-variable framework.
- * Version:           1.6.9
+ * Version:           1.8.0
  * Requires PHP:      7.4
  * Requires at least: 6.0
  * Author:            Orchard Grove Media, LLC
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OGM_GPDM_VERSION', '1.6.9' );
+define( 'OGM_GPDM_VERSION', '1.8.0' );
 define( 'OGM_GPDM_FILE', __FILE__ );
 define( 'OGM_GPDM_DIR', plugin_dir_path( __FILE__ ) );
 define( 'OGM_GPDM_URL', plugin_dir_url( __FILE__ ) );
@@ -80,6 +80,7 @@ final class OGM_GP_Dark_Mode {
 		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_front_assets' ), 20 );
 		add_action( 'generate_menu_bar_items', array( $this, 'render_menu_bar_toggle' ), 20 );
 		add_shortcode( 'gp_dark_mode_toggle', array( $this, 'shortcode_toggle' ) );
+		add_action( 'init', array( $this, 'register_blocks' ) );
 
 		// Admin.
 		add_action( 'admin_menu', array( $this, 'admin_menu' ) );
@@ -753,6 +754,60 @@ final class OGM_GP_Dark_Mode {
 		return $this->toggle_markup();
 	}
 
+	/** Register the Dark Mode Toggle block (blocks/toggle/block.json). */
+	public function register_blocks() {
+		if ( ! function_exists( 'register_block_type' ) ) {
+			return;
+		}
+		register_block_type(
+			OGM_GPDM_DIR . 'blocks/toggle',
+			array( 'render_callback' => array( $this, 'render_toggle_block' ) )
+		);
+	}
+
+	/**
+	 * Front-end output of the Dark Mode Toggle block: the same button as the
+	 * menu-bar toggle (via the shortcode path, which enqueues the toggle
+	 * script), in the block's wrapper so its margin and CSS-class settings apply.
+	 *
+	 * Rendered whatever the "Show the toggle in the GeneratePress menu bar"
+	 * setting says — that option is about the automatic menu-bar placement,
+	 * and a block is an explicit placement.
+	 *
+	 * @param array $attributes Block attributes (unused).
+	 */
+	public function render_toggle_block( $attributes = array() ) {
+		$wrapper = function_exists( 'get_block_wrapper_attributes' )
+			? get_block_wrapper_attributes()
+			: 'class="wp-block-gp-dark-mode-toggle"';
+		return '<div ' . $wrapper . '>' . $this->shortcode_toggle() . '</div>';
+	}
+
+	/**
+	 * Is a published GP Premium Site Header Block Element present? Its header
+	 * replaces GeneratePress's own, so a navigation built inside it (such as a
+	 * GenerateBlocks Navigation block) has no GeneratePress menu bar for the
+	 * automatic toggle to join. Display rules aren't evaluated — it's a hint.
+	 */
+	private function has_site_header_element() {
+		if ( ! post_type_exists( 'gp_elements' ) ) {
+			return false;
+		}
+		$ids = get_posts(
+			array(
+				'post_type'        => 'gp_elements',
+				'post_status'      => 'publish',
+				'numberposts'      => 1,
+				'fields'           => 'ids',
+				'no_found_rows'    => true,
+				'suppress_filters' => false,
+				'meta_key'         => '_generate_block_type', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_key -- one row, settings page only.
+				'meta_value'       => 'site-header', // phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value -- one row, settings page only.
+			)
+		);
+		return ! empty( $ids );
+	}
+
 	/* ---------------------------------------------------------------------
 	 * Admin
 	 * ------------------------------------------------------------------- */
@@ -858,7 +913,7 @@ final class OGM_GP_Dark_Mode {
 			return;
 		}
 		echo '<div class="notice notice-warning"><p>';
-		echo esc_html__( 'GP Dark Mode is built for the GeneratePress theme. Dark styling still applies, but the menu-bar toggle relies on GeneratePress — use the [gp_dark_mode_toggle] shortcode to place the toggle on other themes.', 'gp-dark-mode' );
+		echo esc_html__( 'GP Dark Mode is built for the GeneratePress theme. Dark styling still applies, but the menu-bar toggle relies on GeneratePress — use the Dark Mode Toggle block or the [gp_dark_mode_toggle] shortcode to place the toggle on other themes.', 'gp-dark-mode' );
 		echo '</p></div>';
 	}
 
@@ -977,7 +1032,7 @@ final class OGM_GP_Dark_Mode {
 
 		echo '<h2 class="ogm-gpdm-subhead">' . esc_html__( 'Generated dark palette', 'gp-dark-mode' ) . '</h2>';
 
-		echo '<p class="description">' . esc_html__( 'Dark values derived automatically from this site’s GeneratePress Global Colors (lightness inverted, hue kept, WCAG contrast enforced), redefining GP’s own CSS variables in dark mode — everything GP and GenerateBlocks paint with them flips wholesale. Generate, review the CSS below, then enable. Regenerate after changing the Global Colors.', 'gp-dark-mode' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'Dark values derived automatically from this site’s GeneratePress Global Colors (lightness inverted, hue kept, WCAG contrast enforced), redefining GP’s own CSS variables in dark mode — everything GP and GenerateBlocks paint with them flips wholesale. A second block colors the plugin’s own pieces (the toggle, dark-mode links and alternate surfaces) from the site’s accent. Generate, review the CSS below, then enable. Regenerate after changing the Global Colors.', 'gp-dark-mode' ) . '</p>';
 		echo '<label><input type="checkbox" name="' . esc_attr( self::OPT_KEY ) . '[enable_generated]" value="1" ' . checked( 1, (int) $s['enable_generated'], false ) . ' /> ';
 		echo esc_html__( 'Enable this stylesheet — include the generated palette in the CSS the plugin outputs. Unchecked, it stays saved here but visitors never receive it.', 'gp-dark-mode' ) . '</label>';
 		$generated = $this->generated_css();
@@ -1054,10 +1109,14 @@ final class OGM_GP_Dark_Mode {
 		echo '<p class="description">';
 		printf(
 			/* translators: %s: shortcode. */
-			esc_html__( 'You can also place the toggle anywhere with the %s shortcode.', 'gp-dark-mode' ),
+			esc_html__( 'To place the toggle somewhere else — a header built with a Site Header Block Element or GenerateBlocks Navigation, a footer, a sidebar — add the Dark Mode Toggle block there, or use the %s shortcode.', 'gp-dark-mode' ),
 			'<code>[gp_dark_mode_toggle]</code>'
 		);
 		echo '</p>';
+		if ( $s['show_toggle'] && $this->has_site_header_element() ) {
+			echo '<p class="description ogm-gpdm-header-hint"><strong>' . esc_html__( 'Your site has a Site Header Block Element.', 'gp-dark-mode' ) . '</strong> ';
+			echo esc_html__( 'If its navigation is built inside that element rather than with GeneratePress’s own menu, the menu-bar toggle won’t appear — add the Dark Mode Toggle block to the header element instead.', 'gp-dark-mode' ) . '</p>';
+		}
 		echo '</td>';
 		echo '</tr>';
 
@@ -1070,7 +1129,7 @@ final class OGM_GP_Dark_Mode {
 		echo '<p class="description">';
 		printf(
 			/* translators: %s: CSS variable name. */
-			esc_html__( 'Off by default, matching the original behavior: in dark mode the nav follows the theme’s own --accent color when the theme defines one, and otherwise blends into the page. When on, the nav uses %s instead — editable at the top of the core stylesheet.', 'gp-dark-mode' ),
+			esc_html__( 'Off by default, matching the original behavior: in dark mode the nav follows the theme’s own --accent color when the theme defines one, and otherwise blends into the page. When on, the nav uses %s instead: the site’s accent once the generated palette is enabled, otherwise the built-in blue.', 'gp-dark-mode' ),
 			'<code>--dm-accent</code>'
 		);
 		echo '</p>';
@@ -1147,7 +1206,7 @@ final class OGM_GP_Dark_Mode {
 		} else {
 			echo '<p class="description">' . esc_html__( 'Showing a default list. Save the API key, then click Refresh models to pull the provider’s current lineup.', 'gp-dark-mode' ) . '</p>';
 		}
-		echo '<p class="description">' . esc_html__( 'Effort sets how much reasoning the model spends on the review: higher is more thorough and slower (Max can take several minutes on the largest models). Models that take no effort setting ignore it; OpenAI models below gpt-6 and the o-series top out at High, so Max is sent as High there.', 'gp-dark-mode' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'Effort sets how much reasoning the model spends on the review: higher is more thorough, slower and costs more. Each step also raises the reply allowance — 16,000 / 32,000 / 48,000 / 64,000 tokens for Low / Medium / High / Max, with the model’s thinking counted against it — and the time limit (4 / 7 / 11 / 14 minutes). Models that take no effort setting ignore it; OpenAI models below gpt-6 and the o-series top out at High, so Max is sent as High there.', 'gp-dark-mode' ) . '</p>';
 
 		// One key row per provider — only the selected provider's row shows
 		// (JS toggles on switch; server-side style covers no-JS). Keys are

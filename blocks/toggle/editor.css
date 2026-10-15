@@ -1,0 +1,49 @@
+/*
+ * Dark Mode Toggle block — editor preview only. The front end styles the real
+ * button from the plugin's framework stylesheet; that sheet isn't loaded into
+ * the editor (its custom properties would interfere with the theme's), so the
+ * preview carries its own copy of the switch's light-mode look, scoped to the
+ * block.
+ */
+.wp-block-gp-dark-mode-toggle {
+	display: flex;
+	align-items: center;
+	line-height: 0;
+}
+
+.wp-block-gp-dark-mode-toggle .dm-track {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	justify-content: space-between;
+	box-sizing: border-box;
+	width: 56px;
+	height: 30px;
+	padding: 0 8px;
+	border: 1px solid #d0d0d7;
+	border-radius: 999px;
+	background: #1d428a;
+}
+
+.wp-block-gp-dark-mode-toggle .dm-icon {
+	color: #fff;
+}
+
+.wp-block-gp-dark-mode-toggle .dm-icon svg {
+	display: block;
+	width: 14px;
+	height: 14px;
+}
+
+.wp-block-gp-dark-mode-toggle .dm-knob {
+	position: absolute;
+	top: 3px;
+	left: 3px;
+	width: 22px;
+	height: 22px;
+	box-sizing: border-box;
+	border: 1px solid #d0d0d7;
+	border-radius: 999px;
+	background: #fff;
+	box-shadow: 0 2px 4px rgba(0, 0, 0, .12);
+}

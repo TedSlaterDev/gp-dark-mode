@@ -19,7 +19,7 @@ function __( $text, $domain = null ) { return $text; }
 function esc_attr( $s ) { return htmlspecialchars( (string) $s, ENT_QUOTES ); }
 function esc_attr__( $text, $domain = null ) { return esc_attr( $text ); }
 function sanitize_key( $key ) { return preg_replace( '~[^a-z0-9_-]~', '', strtolower( (string) $key ) ); }
-function add_action( ...$a ) {}
+function add_action( ...$a ) { $GLOBALS['actions'][] = $a; }
 function add_filter( ...$a ) {}
 function add_shortcode( ...$a ) {}
 function register_activation_hook( ...$a ) {}
@@ -86,7 +86,7 @@ function generate_get_global_colors() {
 }
 function get_stylesheet_directory() { global $FIXTURES; return $FIXTURES; }
 function wp_get_custom_css() { return ".customizer-added { background: #eee; }\n/* pasted from AI: ``` */\n.customizer-layout { width: 50%; }"; }
-function get_posts( $args ) { return array( (object) array( 'ID' => 42 ) ); }
+function get_posts( $args ) { $GLOBALS['get_posts_args'][] = $args; return array( (object) array( 'ID' => 42 ) ); }
 function get_permalink( $p ) { return 'https://example.test/latest-post/'; }
 function apply_filters( $tag, $value ) { return $value; }
 function wp_json_encode( $d, $f = 0 ) { return json_encode( $d, $f ); }
@@ -129,6 +129,7 @@ function wp_remote_get( $url, $args = array() ) {
 		return array( 'code' => 200, 'body' => json_encode( array( 'data' => array(
 			array( 'id' => 'claude-haiku-4-5' ),
 			array( 'id' => 'claude-opus-5' ),
+			array( 'id' => 'claude-opus-6' ), // Hypothetical future Opus: the default must follow the list, not the hardcoded id.
 			array( 'id' => 'claude-fable-5' ),
 			array( 'id' => 'not-a-claude' ),
 		) ) ) );
@@ -173,8 +174,14 @@ $GLOBALS['inline_css'] = array();
 function wp_style_is( $handle, $state ) { return 'generate-style' === $handle; }
 function wp_enqueue_style( ...$a ) {}
 function wp_add_inline_style( $handle, $css ) { $GLOBALS['inline_css'][] = array( $handle, $css ); }
-function wp_register_script( ...$a ) {}
-function wp_enqueue_script( ...$a ) {}
+function wp_register_script( ...$a ) { $GLOBALS['scripts_registered'][] = $a[0]; }
+function wp_enqueue_script( ...$a ) { $GLOBALS['scripts_enqueued'][] = $a[0]; }
+function wp_script_is( $handle, $state = 'enqueued' ) { return false; }
+function wp_print_scripts( ...$a ) {}
+function did_action( $hook ) { return 0; }
+function register_block_type( $path, $args = array() ) { $GLOBALS['blocks_registered'][] = array( $path, $args ); return true; }
+function get_block_wrapper_attributes( $extra = array() ) { return 'class="wp-block-gp-dark-mode-toggle"'; }
+function post_type_exists( $type ) { return ! empty( $GLOBALS['post_types'][ $type ] ); }
 
 // ---- load plugin (hook registrations hit the stubs harmlessly) ----
 require dirname( __DIR__ ) . '/gp-dark-mode.php';
@@ -230,6 +237,18 @@ $palette = OGM_GPDM_Palette::generate();
 check( 'palette: generates dark-scope block', false !== strpos( $palette, 'html[data-theme="dark"]' ) );
 check( 'palette: base-2 surface derived', false !== strpos( $palette, '--base-2:' ) );
 check( 'palette: contrast text derived', false !== strpos( $palette, '--contrast:' ) );
+
+// The plugin's own tokens: the fixture's accent IS the framework's built-in
+// accent, so its tuned toggle/link/alternate-surface set is kept (nothing
+// emitted); any other accent derives them.
+check( 'tokens: built-in accent emits no plugin tokens', false === strpos( $palette, '--dm-accent:' ) && false === strpos( $palette, '--bg-2:' ) && false !== strpos( $palette, 'built-in accent' ) );
+$GLOBALS['wp_options']['generate_settings']['link_color'] = '#0e6e8e';
+$teal = OGM_GPDM_Palette::generate();
+check( 'tokens: other accent -> :root track + glow', (bool) preg_match( '~:root \{\n\t--dm-accent: #0e6e8e;.*\n\t--dm-glow: #[0-9a-f]{6};~', $teal ) );
+check( 'tokens: other accent -> dark link + glow + alternate surface', (bool) preg_match( '~html\[data-theme="dark"\] \{\n\t--bg-2: #[0-9a-f]{6};[^}]*--surface-2: #[0-9a-f]{6};[^}]*--dm-glow: #[0-9a-f]{6};[^}]*--link: #[0-9a-f]{6};~', $teal ) );
+check( 'tokens: printed after the Global Color block', strpos( $teal, '--contrast:' ) < strpos( $teal, '--dm-accent:' ) );
+check( 'tokens: Global Color block unchanged by the accent', substr( $palette, 0, strpos( $palette, "}\n" ) ) === substr( $teal, 0, strpos( $teal, "}\n" ) ) );
+$GLOBALS['wp_options']['generate_settings']['link_color'] = '#1d428a';
 
 // Usage-aware classification (live WTT case): a background-ish GP setting
 // referencing var(--contrast) marks the "text"-named color as a SURFACE —
@@ -394,8 +413,20 @@ check( 'ai anthropic: proposal stored with css', null !== $prop && false !== str
 check( 'ai anthropic: notes stored', false !== strpos( $prop['notes'], 'fixed the widget' ) );
 $req  = $GLOBALS['ai_requests'][0];
 $body = json_decode( $req['args']['body'], true );
-check( 'ai anthropic: endpoint + default model', false !== strpos( $req['url'], 'api.anthropic.com' ) && 'claude-opus-5' === $body['model'] );
+check( 'ai anthropic: endpoint + default model', false !== strpos( $req['url'], 'api.anthropic.com' ) && 'claude-opus-5-5' === $body['model'] );
 check( 'ai anthropic: refusal fallbacks + effort set', 'default' === $body['fallbacks'] && 'medium' === $body['output_config']['effort'] );
+check( 'ai anthropic: medium allowance + timeout', 32000 === $body['max_tokens'] && 420 === $req['args']['timeout'] );
+
+// Claude Haiku 5.5 thinks by default too: it gets the effort, the scaled
+// allowance and fallbacks:"default" (accepted; the refusal just stands).
+$GLOBALS['wp_options']['ogm_gpdm_settings']['ai_model'] = 'claude-haiku-5-5';
+reset_settings_cache( $plugin );
+$GLOBALS['ai_requests'] = array();
+OGM_GPDM_AI::run_review( $plugin );
+$hbody = json_decode( $GLOBALS['ai_requests'][0]['args']['body'], true );
+check( 'ai anthropic: Haiku 5.5 gets effort + allowance + fallbacks', 'claude-haiku-5-5' === $hbody['model'] && 'medium' === $hbody['output_config']['effort'] && 32000 === $hbody['max_tokens'] && 'default' === $hbody['fallbacks'] );
+$GLOBALS['wp_options']['ogm_gpdm_settings']['ai_model'] = '';
+reset_settings_cache( $plugin );
 check( 'ai anthropic: beta header + key header', isset( $req['args']['headers']['anthropic-beta'], $req['args']['headers']['x-api-key'] ) );
 check( 'ai anthropic: bundle included in prompt', false !== strpos( $body['messages'][0]['content'], 'AI Context Bundle' ) );
 
@@ -419,6 +450,15 @@ $GLOBALS['ai_response'] = array(
 );
 $result = OGM_GPDM_AI::run_review( $plugin );
 check( 'ai anthropic: truncated reply rejected', is_wp_error( $result ) && 'ogm_gpdm_ai_truncated' === $result->get_error_code() );
+check( 'ai anthropic: truncation names the allowance + Effort advice', is_wp_error( $result ) && false !== strpos( $result->get_error_message(), '32,000 tokens' ) && false !== strpos( $result->get_error_message(), 'lower Effort' ) && false === strpos( $result->get_error_message(), 'Additional CSS' ) );
+
+// A transport timeout is explained in Effort terms, not as a raw cURL error.
+$GLOBALS['ai_response'] = new WP_Error( 'http_request_failed', 'cURL error 28: Operation timed out after 420001 milliseconds with 0 bytes received' );
+$result = OGM_GPDM_AI::run_review( $plugin );
+check( 'ai anthropic: timeout explained with the minute limit', is_wp_error( $result ) && 'ogm_gpdm_ai_timeout' === $result->get_error_code() && false !== strpos( $result->get_error_message(), '7-minute' ) );
+$GLOBALS['ai_response'] = new WP_Error( 'http_request_failed', 'cURL error 6: Could not resolve host' );
+$result = OGM_GPDM_AI::run_review( $plugin );
+check( 'ai anthropic: other transport errors pass through', is_wp_error( $result ) && 'http_request_failed' === $result->get_error_code() );
 
 // OpenAI success path.
 $GLOBALS['wp_options']['ogm_gpdm_settings'] = array( 'ai_provider' => 'openai', 'ai_api_key_openai' => 'sk-oa', 'ai_model' => '' );
@@ -433,18 +473,19 @@ $prop   = OGM_GPDM_AI::proposal();
 check( 'ai openai: review succeeds + proposal stored', true === $result && null !== $prop && false !== strpos( $prop['css'], '.oa-test' ) );
 $req  = $GLOBALS['ai_requests'][0];
 $body = json_decode( $req['args']['body'], true );
-check( 'ai openai: endpoint + default model + medium effort default', false !== strpos( $req['url'], 'api.openai.com' ) && 'gpt-5' === $body['model'] && 'medium' === $body['reasoning_effort'] && 180 === $req['args']['timeout'] );
+check( 'ai openai: endpoint + default model + medium effort default', false !== strpos( $req['url'], 'api.openai.com' ) && 'gpt-6.1-sol' === $body['model'] && 'medium' === $body['reasoning_effort'] && 420 === $req['args']['timeout'] && 32000 === $body['max_completion_tokens'] );
 check( 'ai openai: bearer auth', 'Bearer sk-oa' === $req['args']['headers']['authorization'] );
 
 // The Effort setting flows through: Max is capped to high on gpt-5 (the
 // o-series/gpt-5.x ceiling) and the HTTP timeout scales with it.
 $GLOBALS['wp_options']['ogm_gpdm_settings']['ai_effort'] = 'max';
+$GLOBALS['wp_options']['ogm_gpdm_settings']['ai_model']  = 'gpt-5';
 reset_settings_cache( $plugin );
 $GLOBALS['ai_requests'] = array();
 OGM_GPDM_AI::run_review( $plugin );
 $req2  = $GLOBALS['ai_requests'][0];
 $body2 = json_decode( $req2['args']['body'], true );
-check( 'ai openai: Max effort capped to high on gpt-5 + scaled timeout', 'high' === $body2['reasoning_effort'] && 420 === $req2['args']['timeout'] );
+check( 'ai openai: Max effort capped to high on gpt-5 + scaled timeout + allowance', 'high' === $body2['reasoning_effort'] && 660 === $req2['args']['timeout'] && 48000 === $body2['max_completion_tokens'] );
 unset( $GLOBALS['wp_options']['ogm_gpdm_settings']['ai_effort'] );
 reset_settings_cache( $plugin );
 
@@ -474,7 +515,7 @@ delete_option( OGM_GPDM_AI::AI_CSS_KEY );
 
 // Before any refresh: seed list, with the saved custom model kept selectable.
 $choices = OGM_GPDM_AI::model_choices( 'anthropic', 'my-custom-model' );
-check( 'models: seed list before refresh + current first', 'my-custom-model' === $choices[0] && in_array( 'claude-opus-5', $choices, true ) );
+check( 'models: seed list before refresh + current first', 'my-custom-model' === $choices[0] && in_array( 'claude-opus-5-5', $choices, true ) );
 
 check( 'models: refresh without key errors', is_wp_error( OGM_GPDM_AI::refresh_models( 'anthropic', '' ) ) );
 
@@ -483,9 +524,11 @@ check( 'models anthropic: refreshed + ranked (fable first)', is_array( $refreshe
 check( 'models anthropic: non-claude ids filtered', ! in_array( 'not-a-claude', $refreshed, true ) );
 check( 'models: cache stored per provider', isset( $GLOBALS['wp_options']['ogm_gpdm_ai_models']['anthropic']['ids'] ) );
 check( 'models: choices now serve the cache', in_array( 'claude-fable-5', OGM_GPDM_AI::model_choices( 'anthropic' ), true ) );
+check( 'models anthropic: default follows the newest Opus in the refreshed list, not the ranked top', 'claude-opus-6' === OGM_GPDM_AI::default_model( 'anthropic' ) );
 
 $refreshed = OGM_GPDM_AI::refresh_models( 'openai', 'sk-x' );
 check( 'models openai: gpt-5 first, snapshot collapsed, non-chat filtered', is_array( $refreshed ) && 'gpt-5' === $refreshed[0] && ! in_array( 'gpt-4o-2024-05-13', $refreshed, true ) && ! in_array( 'whisper-1', $refreshed, true ) );
+check( 'models openai: default follows the refreshed top', 'gpt-5' === OGM_GPDM_AI::default_model( 'openai' ) );
 
 // The bundle must NEVER contain the API key (it gets downloaded, shared, and
 // sent to providers inside the review prompt).
@@ -499,6 +542,59 @@ $markup = $plugin->toggle_markup();
 check( 'toggle: svg icons replace font glyphs', false !== strpos( $markup, '<svg' ) && false === strpos( $markup, '&#9790;' ) && false === strpos( $markup, '&#9728;' ) );
 check( 'toggle: moon filled via currentColor', false !== strpos( $markup, 'fill="currentColor"' ) );
 check( 'toggle: dm-sun/dm-moon classes preserved for CSS', false !== strpos( $markup, 'dm-sun' ) && false !== strpos( $markup, 'dm-moon' ) );
+
+// ---- v1.7.0: Dark Mode Toggle block ----
+// Headers built with a Site Header Block Element / GenerateBlocks Navigation
+// have no GeneratePress menu bar, so the automatic toggle never renders there.
+$options_before     = $GLOBALS['wp_options'];
+$GLOBALS['actions'] = array();
+$plugin->boot(); // The harness never fires plugins_loaded; boot() registers the hooks.
+$GLOBALS['wp_options'] = $options_before; // boot() also runs maybe_upgrade().
+reset_settings_cache( $plugin );
+$init_hooked = false;
+foreach ( $GLOBALS['actions'] as $hooked ) {
+	if ( 'init' === $hooked[0] && is_array( $hooked[1] ) && 'register_blocks' === $hooked[1][1] ) {
+		$init_hooked = true;
+	}
+}
+check( 'block: registration hooked on init', $init_hooked );
+
+$GLOBALS['blocks_registered'] = array();
+$plugin->register_blocks();
+$reg = $GLOBALS['blocks_registered'][0] ?? null;
+check( 'block: registered from blocks/toggle with a render callback', null !== $reg && str_ends_with( rtrim( $reg[0], '/' ), 'blocks/toggle' ) && array( $plugin, 'render_toggle_block' ) === $reg[1]['render_callback'] );
+
+$block_dir  = dirname( __DIR__ ) . '/blocks/toggle';
+$block_json = json_decode( (string) file_get_contents( $block_dir . '/block.json' ), true );
+check( 'block: block.json parses with the expected name + apiVersion 3', is_array( $block_json ) && 'gp-dark-mode/toggle' === $block_json['name'] && 3 === $block_json['apiVersion'] && 'gp-dark-mode' === $block_json['textdomain'] );
+check( 'block: server-rendered (no saved markup to go stale)', ! isset( $block_json['attributes'] ) && false !== strpos( (string) file_get_contents( $block_dir . '/index.js' ), 'return null;' ) );
+check( 'block: editor files referenced by block.json exist', is_file( $block_dir . '/' . substr( $block_json['editorScript'], 7 ) ) && is_file( $block_dir . '/' . substr( $block_json['editorStyle'], 7 ) ) );
+$asset = require $block_dir . '/index.asset.php';
+check( 'block: asset file lists the editor globals the script uses', array() === array_diff( array( 'wp-blocks', 'wp-element', 'wp-block-editor' ), $asset['dependencies'] ) );
+check( 'block: client registers the same name as block.json', false !== strpos( (string) file_get_contents( $block_dir . '/index.js' ), "registerBlockType( 'gp-dark-mode/toggle'" ) );
+
+$GLOBALS['scripts_enqueued'] = array();
+$GLOBALS['wp_options']['ogm_gpdm_settings']['show_toggle'] = 0;
+reset_settings_cache( $plugin );
+$block_html = $plugin->render_toggle_block( array() );
+check( 'block: renders the toggle button inside the block wrapper', 0 === strpos( $block_html, '<div class="wp-block-gp-dark-mode-toggle">' ) && false !== strpos( $block_html, 'class="dm-toggle"' ) && false !== strpos( $block_html, 'role="switch"' ) );
+check( 'block: enqueues the toggle script even with the menu-bar toggle off', in_array( 'gp-dark-mode-toggle', $GLOBALS['scripts_enqueued'], true ) );
+unset( $GLOBALS['wp_options']['ogm_gpdm_settings']['show_toggle'] );
+reset_settings_cache( $plugin );
+
+$fw = (string) file_get_contents( dirname( __DIR__ ) . '/assets/css/gp-dark-mode.css' );
+check( 'block: front-end CSS drops the menu-bar margin inside the wrapper', false !== strpos( $fw, '.wp-block-gp-dark-mode-toggle .dm-toggle' ) );
+
+// Settings-page hint: a published Site Header Block Element.
+$has_header = new ReflectionMethod( $plugin, 'has_site_header_element' );
+$GLOBALS['post_types']     = array();
+$GLOBALS['get_posts_args'] = array();
+check( 'block hint: no GP Premium Elements → no hint, no query', false === $has_header->invoke( $plugin ) && array() === $GLOBALS['get_posts_args'] );
+$GLOBALS['post_types'] = array( 'gp_elements' => true );
+check( 'block hint: a site-header Block Element is detected', true === $has_header->invoke( $plugin ) );
+$q = $GLOBALS['get_posts_args'][0] ?? array();
+check( 'block hint: asks for one published site-header element', 'gp_elements' === $q['post_type'] && 'publish' === $q['post_status'] && '_generate_block_type' === $q['meta_key'] && 'site-header' === $q['meta_value'] && 1 === $q['numberposts'] );
+$GLOBALS['post_types'] = array();
 
 // ---- v1.4.2: per-provider keys + instructions ----
 

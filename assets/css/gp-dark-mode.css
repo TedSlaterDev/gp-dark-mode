@@ -27,8 +27,10 @@ html.theme-init * {
 	--border: #d0d0d7;
 	--link: #1d428a;
 
-	/* Toggle accent (the track color). */
+	/* Toggle accent (the track color) and its hover glow. The generated
+	   palette (Layer 2) derives both from the site's accent. */
 	--dm-accent: #1d428a;
+	--dm-glow: #0056ff;
 
 	/* Carried over verbatim from the original site CSS. Self-referential —
 	   but NOT necessarily invalid: this sheet prints inline on generate-style
@@ -53,6 +55,7 @@ html[data-theme="dark"] {
 	--text-muted: #b2b2be;
 	--border: #333340;
 	--link: #9ad;
+	--dm-glow: #122666;
 }
 
 /* =========================
@@ -118,6 +121,18 @@ html[data-theme="dark"] .site-content select {
 	-webkit-tap-highlight-color: transparent;
 }
 
+/* The Dark Mode Toggle block: the wrapper takes the block's spacing settings,
+   so the button drops the menu-bar margin it carries above. */
+.wp-block-gp-dark-mode-toggle {
+	display: flex;
+	align-items: center;
+	line-height: 0;
+}
+
+.wp-block-gp-dark-mode-toggle .dm-toggle {
+	margin: 0;
+}
+
 .dm-track {
 	position: relative;
 	display: inline-flex;
@@ -143,7 +158,7 @@ html[data-theme="dark"] .site-content select {
    are what actually keeps the track's fill/glow animating (as on the
    original site). */
 .dm-track:hover {
-	box-shadow: inset 0 0 10px 5px var(--dm-accent), inset 0 0 0 20px #0056ff;
+	box-shadow: inset 0 0 10px 5px var(--dm-accent), inset 0 0 0 20px var(--dm-glow);
 	transition: box-shadow 0.3s ease-in-out;
 }
 
@@ -154,7 +169,7 @@ html[data-theme="dark"] .dm-track {
 }
 
 html[data-theme="dark"] .dm-track:hover {
-	box-shadow: inset 0 0 10px 0 #000000, inset 0 0 0 20px #122666;
+	box-shadow: inset 0 0 10px 0 #000000, inset 0 0 0 20px var(--dm-glow);
 	transition: box-shadow 0.3s ease-in-out;
 }
 

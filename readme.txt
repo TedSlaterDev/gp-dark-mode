@@ -4,7 +4,7 @@ Tags: dark mode, generatepress, dark theme, toggle, color scheme
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.6.9
+Stable tag: 1.8.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -15,7 +15,7 @@ Robust, no-flash, accessible dark mode for the GeneratePress theme, with a menu-
 GP Dark Mode adds a polished light/dark experience to GeneratePress:
 
 * **No flash of the wrong theme.** An inline head script sets the theme before first paint.
-* **Accessible toggle.** A `role="switch"` button in the GeneratePress menu bar (keyboard + screen-reader friendly), or place it anywhere with the `[gp_dark_mode_toggle]` shortcode.
+* **Accessible toggle.** A `role="switch"` button in the GeneratePress menu bar (keyboard + screen-reader friendly). To place it anywhere else — including headers built with a Site Header Block Element or GenerateBlocks Navigation — use the **Dark Mode Toggle block** or the `[gp_dark_mode_toggle]` shortcode.
 * **Remembers the visitor's choice** via localStorage, with a cookie fallback.
 * **Optional system-preference matching** (`prefers-color-scheme`) for first-time visitors, with live updates when the OS theme changes.
 * **Clean CSS-variable framework** (`assets/css/gp-dark-mode.css`) you can recolor in one place.
@@ -30,7 +30,7 @@ GP Dark Mode adds a polished light/dark experience to GeneratePress:
 * Respect the visitor's system preference on first visit
 * Show the menu-bar toggle
 * Recolor the navigation bar with the accent color in dark mode (off by default)
-* Generated dark palette (Layer 2): generate from the Global Colors, review, enable — with a Regenerate button
+* Generated dark palette (Layer 2): generate from the Global Colors, review, enable — with a Regenerate button. It also colors the toggle, dark links and alternate surfaces from your accent
 * Integration modules (Layer 3): per-vendor checkboxes with auto-detection badges
 * AI stylesheet (Layer 4a): the reviewer's layer — enable/disable, diff, apply, swap back
 * Manual CSS editor (Layer 4b: enable/disable + edit your styles in the dashboard — loads last, always wins)
@@ -47,10 +47,13 @@ GP Dark Mode adds a polished light/dark experience to GeneratePress:
 == Frequently Asked Questions ==
 
 = Does it require GeneratePress? =
-The styling and toggle behavior work on any theme, but the automatic menu-bar placement uses a GeneratePress hook. On other themes, use the `[gp_dark_mode_toggle]` shortcode.
+The styling and toggle behavior work on any theme, but the automatic menu-bar placement uses a GeneratePress hook. On other themes, use the Dark Mode Toggle block or the `[gp_dark_mode_toggle]` shortcode.
+
+= My header is built with blocks and the toggle doesn't appear =
+A Site Header Block Element (for example one holding a GenerateBlocks Navigation block) replaces GeneratePress's header, so there is no menu bar for the automatic toggle to join. Add the Dark Mode Toggle block to the header element where you want the switch. The settings page points this out when it finds a Site Header Block Element.
 
 = How do I change the colors? =
-Edit the CSS variables at the top of `assets/css/gp-dark-mode.css`.
+Click "Generate from Global Colors" on the Generated tab, review, and enable it: dark values are derived from your GeneratePress Global Colors, and the toggle, dark-mode links and alternate surfaces from your accent color. To change any color by hand, redefine its CSS variable in the Manual CSS tab (for example `html[data-theme="dark"] { --link: #8fd; }`). The Manual CSS loads last and is never overwritten.
 
 = How do I edit the site-specific tweaks? =
 Use the **Additional CSS** editor on the settings page (Settings → GP Dark Mode). It starts empty and only you write to it — the home for per-placement ad selectors and one-off page chrome. Toggle it off there to run without your overrides.
@@ -89,6 +92,24 @@ your own site (loopback requests); that step sends nothing to any third
 party.
 
 == Changelog ==
+
+= 1.8.0 =
+* New: **the generated palette now colors the plugin's own pieces from your site, too.** The toggle, its hover glow, the current menu item and form fields in dark mode, and dark-mode links used to keep the framework's built-in navy blues on every site. Generating the palette now derives them from your site: the toggle takes your accent (the color your links use, else your button color, else a Global Color named accent, primary or brand), its hover glow is a brighter shade of it (the white icons stay at 3:1 or better), dark-mode links are a light shade of it that reaches 4.5:1 on every dark surface, and the dark alternate surface is your palette's second surface. These print as a separate block in the Generated tab, each with a note saying where it came from. Regenerate the palette to pick them up.
+* Changed: the toggle's two hover-glow colors are now one CSS variable, `--dm-glow` (light and dark values), so a palette or your Manual CSS can set them. The built-in values are unchanged, so the toggle looks identical until you regenerate.
+* Note: a site whose accent is already the framework's built-in accent (#1d428a) keeps the built-in toggle, link and surface colors, which were hand-tuned for that accent. Regenerating there changes nothing.
+
+= 1.7.2 =
+* Changed: the AI model lists shown before your first "Refresh models" are now the providers' current lineups — Claude Opus 5.5, Fable 5.1, Sonnet 5.5 and Haiku 5.5; GPT-6.1 Sol, GPT-6 Astra, GPT-6 Luna and GPT-5 — and "Provider default" is Claude Opus 5.5 or GPT-6.1 Sol on a fresh install.
+* Changed: after a refresh, the Anthropic "Provider default" follows the newest Opus in the refreshed list (it was pinned to Claude Opus 5), the same way the OpenAI default already follows the top of its list.
+* Fixed: Claude Haiku 5.5 never received the Effort setting, the effort-scaled reply allowance or the server-side refusal fallback, because the plugin didn't recognise it as a current model.
+
+= 1.7.1 =
+* Fixed: an AI review at High or Max effort could fail with "The response hit the token limit" before writing any CSS. Reasoning models count their thinking against the reply allowance, and newer models such as Claude Opus 5.5 always think, so the old fixed 16,000-token allowance could be used up before the stylesheet was started. The allowance now grows with the Effort setting — 16,000 / 32,000 / 48,000 / 64,000 tokens for Low / Medium / High / Max — and so does the time limit for the request (4 / 7 / 11 / 14 minutes). Models that take no effort setting keep 16,000.
+* Changed: the token-limit and timeout errors now say what ran out and suggest a lower Effort setting or a faster model, instead of pointing at a developer filter and the Additional CSS.
+
+= 1.7.0 =
+* New: **Dark Mode Toggle block.** Insert the switch anywhere the block editor reaches — a Site Header or Site Footer Block Element, a header built with GenerateBlocks Pro's Site Header and Navigation blocks, a sidebar, or a page. Headers built that way replace GeneratePress's own navigation, so the automatic menu-bar toggle never appeared there. The block renders the same accessible button as the menu bar, takes the block editor's margin and CSS-class settings, and works whatever the "Show the toggle in the GeneratePress menu bar" setting says.
+* New: the Settings tab notices a published Site Header Block Element and suggests the block when the menu-bar toggle may not appear.
 
 = 1.6.9 =
 * Fixed: the toggle button now carries a 20px border radius, so a theme's own button hover/focus background follows the pill shape instead of showing as a rectangle behind the track.
@@ -190,7 +211,7 @@ party.
 
 = 1.3.0 =
 * New: **AI Assist (BYOK)** — the plugin can now run the dark-mode review itself. Configure a provider (Anthropic or OpenAI), model, and your own API key under AI Assist; "Run AI Review" sends the AI Context Bundle to your account and stores the reply as a **proposal**: prose notes plus a complete replacement for the Additional CSS layer, rendered as a color-marked diff against the current copy. Apply (with an automatic backup of what was effective before, including the bundled seed on never-saved installs) or Discard — nothing is ever applied without a click. **Restore is a swap**: the current Additional CSS trades places with the backup, so restoring is itself reversible and a stale backup can never destroy later hand edits.
-* Defaults: Anthropic `claude-opus-5` (with server-side refusal fallbacks enabled and reasoning effort `medium`, filterable via `ogm_gpdm_ai_effort` — raise it if your host allows long requests) or OpenAI `gpt-5` (reasoning effort low, matching Editorial QA's fast-scan choice). A truncated reply (token-limit hit) is rejected rather than stored — raise the budget via `ogm_gpdm_ai_max_tokens` if that happens. A run — bundle assembly plus the model call, in one request — typically takes 1–3 minutes and costs a few tens of cents; if your host cuts long requests, reload the settings page after a couple of minutes, the proposal may still have been stored.
+* Defaults: the newest model from the provider's refreshed list (before a refresh, Anthropic `claude-opus-5-5` or OpenAI `gpt-6.1-sol`; after one, Anthropic's newest Opus or OpenAI's top-ranked model), with reasoning effort `medium` unless you choose another Effort; Anthropic requests enable server-side refusal fallbacks. The `ogm_gpdm_ai_effort` filter overrides the effort sent. The reply allowance scales with Effort (16,000 / 32,000 / 48,000 / 64,000 tokens, thinking included); a truncated reply is rejected rather than stored, and developers can change the allowance with the `ogm_gpdm_ai_max_tokens` filter (`$tokens, $provider, $model, $effort`; clamped to 4,000–128,000). A run — bundle assembly plus the model call, in one request — typically takes 1–3 minutes and costs a few tens of cents; if your host cuts long requests, reload the settings page after a couple of minutes, the proposal may still have been stored.
 * Privacy: the review sends the bundle — including the child theme's `functions.php` with best-effort secret redaction — to the provider you configured, and nowhere else; the API key itself is redacted out of the bundle. On multisite, running a review is network-admin-only, like the bundle download. The key is stored in the plugin's settings option and removed on uninstall (on multisite, uninstall cleans every site's rows); type "clear" in the key field to remove it sooner.
 * Proposal and backup live in their own non-autoloaded options (`ogm_gpdm_ai_proposal`, `ogm_gpdm_ai_backup`), cleaned up on uninstall.
 

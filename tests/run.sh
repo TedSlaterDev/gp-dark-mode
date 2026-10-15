@@ -23,4 +23,13 @@ run_suite() {
 run_suite unit.php     " passed, 0 failed"
 run_suite coverage.php "PASS: all"
 run_suite smoke.php    " passed, 0 failed"
+
+# The block's editor script ships unbuilt, so at least prove it parses.
+if command -v node >/dev/null 2>&1; then
+	echo "=== blocks/toggle/index.js (node --check) ==="
+	node --check ../blocks/toggle/index.js
+	echo "syntax OK"
+else
+	echo "(node not found — skipped the editor-script syntax check)"
+fi
 echo "All suites passed."

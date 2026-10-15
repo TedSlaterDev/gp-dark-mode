@@ -351,6 +351,85 @@ $p8 = OGM_GPDM_Palette::derive_palette(
 );
 check( 'usage: brand exempt from usage override', ! isset( $p8['map']['accent'] ) && false !== strpos( implode( '|', $p8['kept'] ), 'accent' ) );
 
+// ---- the plugin's own tokens, derived from the site palette (1.8.0) ----
+// Live AFS case: the toggle, the current menu item and dark links carried the
+// framework's built-in navy (#1d428a / #17284f / #9ad) on a teal site.
+
+check( 'surfaces: rank order recorded', array( 'base-3', 'base-2', 'base' ) === $p['surfaces'] );
+
+$afs = array(
+	array( 'slug' => 'afs-ink', 'color' => '#07313D' ),
+	array( 'slug' => 'afs-accent', 'color' => '#0E6E8E' ),
+	array( 'slug' => 'afs-accent-deep', 'color' => '#0A4254' ),
+	array( 'slug' => 'afs-surface', 'color' => '#FFFFFF' ),
+	array( 'slug' => 'afs-surface-alt', 'color' => '#EFF5F4' ),
+	array( 'slug' => 'afs-ink-soft', 'color' => '#3A4F51' ),
+);
+$acc = OGM_GPDM_Palette::find_accent( $afs, array( 'link_color' => 'var(--afs-accent)' ) );
+check( 'accent: link color var() resolves to its Global Color', null !== $acc && '#0e6e8e' === $acc['hex'] && false !== strpos( $acc['from'], '--afs-accent' ) );
+check( 'accent: literal link color accepted', '#0e6e8e' === OGM_GPDM_Palette::find_accent( array(), array( 'link_color' => '#0E6E8E' ) )['hex'] );
+check( 'accent: neutral link color skipped for a named accent slug', '#1e73be' === OGM_GPDM_Palette::find_accent( $gp_defaults, array( 'link_color' => 'var(--contrast)' ) )['hex'] );
+check( 'accent: none found -> null', null === OGM_GPDM_Palette::find_accent( array( array( 'slug' => 'contrast', 'color' => '#222222' ) ), array( 'link_color' => '#000000' ) ) );
+check( 'accent: unknown var() slug skipped', '#0e6e8e' === OGM_GPDM_Palette::find_accent( $afs, array( 'link_color' => 'var(--nope)' ) )['hex'] );
+
+$afs_p = OGM_GPDM_Palette::derive_palette( $afs );
+$t     = OGM_GPDM_Palette::derive_tokens( $afs_p, $acc );
+$rank2 = $afs_p['map'][ $afs_p['surfaces'][1] ]['dark'];
+check( 'tokens: --dm-accent is the site accent', '#0e6e8e' === $t['root']['--dm-accent'][0] );
+check( 'tokens: dark --bg-2/--surface-2 = rank-2 surface', $rank2 === $t['dark']['--bg-2'][0] && $rank2 === $t['dark']['--surface-2'][0] && 'afs-surface-alt' === $afs_p['surfaces'][1] );
+check( 'tokens: framework dark --text readable on --bg-2', OGM_GPDM_Palette::contrast_ratio( '#f0f0f0', $t['dark']['--bg-2'][0] ) >= 4.5 );
+$link = $t['dark']['--link'][0];
+check( 'tokens: dark --link >= 4.5:1 on every dark surface', OGM_GPDM_Palette::contrast_ratio( $link, OGM_GPDM_Palette::DARK_REF ) >= 4.5 && OGM_GPDM_Palette::contrast_ratio( $link, $rank2 ) >= 4.5 && OGM_GPDM_Palette::contrast_ratio( $link, $afs_p['map']['afs-surface']['dark'] ) >= 4.5 );
+check( 'tokens: dark --link keeps the accent hue', abs( OGM_GPDM_Palette::hex_to_hsl( $link )[0] - OGM_GPDM_Palette::hex_to_hsl( '#0e6e8e' )[0] ) < 0.02 );
+$glow = $t['root']['--dm-glow'][0];
+check( 'tokens: light glow keeps white icons >= 3:1', OGM_GPDM_Palette::contrast_ratio( '#ffffff', $glow ) >= 3 );
+check( 'tokens: light glow differs from the track', '#0e6e8e' !== $glow && OGM_GPDM_Palette::hex_to_hsl( $glow )[2] > OGM_GPDM_Palette::hex_to_hsl( '#0e6e8e' )[2] );
+check( 'tokens: dark glow is deep', OGM_GPDM_Palette::hex_to_hsl( $t['dark']['--dm-glow'][0] )[2] < 0.3 );
+
+// Derived from the built-in accent itself, the rules land next to the
+// framework's hand-tuned values — evidence they encode the same design.
+$near = OGM_GPDM_Palette::derive_tokens( array( 'map' => array(), 'surfaces' => array() ), array( 'hex' => '#1d428b', 'from' => 'test' ) );
+$dist = function ( $a, $b ) { $x = OGM_GPDM_Palette::hex_to_rgb( $a ); $y = OGM_GPDM_Palette::hex_to_rgb( $b ); return max( abs( $x[0] - $y[0] ), abs( $x[1] - $y[1] ), abs( $x[2] - $y[2] ) ); };
+check( 'tokens: rules ~reproduce the tuned set (glow #0056ff, link #99aadd)', $dist( $near['root']['--dm-glow'][0], '#0056ff' ) <= 4 && $dist( $near['dark']['--link'][0], '#99aadd' ) <= 12 );
+
+// The reference site's palette (accent = the framework's built-in accent):
+// nothing emitted, so a regenerate there leaves its toggle, links and
+// alternate surface exactly as they are today.
+$ref_colors = array(
+	array( 'slug' => 'contrast', 'color' => '#222222' ),
+	array( 'slug' => 'contrast-2', 'color' => '#575760' ),
+	array( 'slug' => 'contrast-3', 'color' => '#b2b2be' ),
+	array( 'slug' => 'base', 'color' => '#f0f0f0' ),
+	array( 'slug' => 'base-2', 'color' => '#f7f8f9' ),
+	array( 'slug' => 'base-3', 'color' => '#ffffff' ),
+	array( 'slug' => 'accent', 'color' => '#1d428a' ),
+	array( 'slug' => 'global-color-8', 'color' => '#e3a700' ),
+	array( 'slug' => 'global-color-9', 'color' => '#0346cc' ),
+	array( 'slug' => 'global-color-10', 'color' => '#ffbb00' ),
+);
+foreach ( array( 'var(--accent)', '#1d428a', '' ) as $ref_link ) {
+	$ref_t = OGM_GPDM_Palette::derive_tokens(
+		OGM_GPDM_Palette::derive_palette( $ref_colors ),
+		OGM_GPDM_Palette::find_accent( $ref_colors, array( 'link_color' => $ref_link ) )
+	);
+	check( "tokens: built-in accent keeps the framework set (link_color '$ref_link')", array() === $ref_t['root'] && array() === $ref_t['dark'] && false !== strpos( implode( '|', $ref_t['notes'] ), 'built-in accent' ) );
+}
+
+// One ranked surface + an accent: --bg-2 falls back to a dark accent tint.
+$one = OGM_GPDM_Palette::derive_tokens( OGM_GPDM_Palette::derive_palette( array( array( 'slug' => 'base', 'color' => '#ffffff' ) ) ), array( 'hex' => '#0e6e8e', 'from' => 'test' ) );
+check( 'tokens: no rank-2 surface -> accent-tinted --bg-2', isset( $one['dark']['--bg-2'] ) && abs( OGM_GPDM_Palette::hex_to_hsl( $one['dark']['--bg-2'][0] )[0] - OGM_GPDM_Palette::hex_to_hsl( '#0e6e8e' )[0] ) < 0.02 && OGM_GPDM_Palette::contrast_ratio( '#f0f0f0', $one['dark']['--bg-2'][0] ) >= 4.5 );
+
+// No accent: the toggle and link keep the framework's colors; a rank-2
+// surface still feeds --bg-2.
+$none = OGM_GPDM_Palette::derive_tokens( $afs_p, null );
+check( 'tokens: no accent -> no toggle/link tokens', array() === $none['root'] && ! isset( $none['dark']['--link'] ) && ! isset( $none['dark']['--dm-glow'] ) && false !== strpos( implode( '|', $none['notes'] ), 'no accent found' ) );
+check( 'tokens: no accent -> --bg-2 still from rank 2', $rank2 === $none['dark']['--bg-2'][0] );
+
+// The framework's hover glows are now one variable; its built-in values
+// must stay exactly the old literals (upgrades render pixel-identically).
+check( 'framework: hover glows use --dm-glow', 2 === substr_count( $fw, 'inset 0 0 0 20px var(--dm-glow)' ) && false === strpos( $fw, '20px #0056ff' ) && false === strpos( $fw, '20px #122666' ) );
+check( 'framework: --dm-glow defaults are the old literals', (bool) preg_match( '~:root\s*\{[^}]*--dm-glow:\s*#0056ff;~', $fw ) && (bool) preg_match( '~html\[data-theme="dark"\]\s*\{[^}]*--dm-glow:\s*#122666;~', $fw ) );
+
 // ---- OGM_GPDM_AI::extract_css (pure response parsing) ----
 
 $r = OGM_GPDM_AI::extract_css( "- darkened the widget\n- pruned duplicates\n\n```css\nhtml[data-theme=\"dark\"] .x { color: #fff; }\n```\nDone." );
@@ -389,10 +468,25 @@ check( 'effort: max passes through on Claude 5', 'max' === OGM_GPDM_AI::effort_f
 check( 'effort: max capped to high on gpt-5.x and o-series', 'high' === OGM_GPDM_AI::effort_for( 'openai', 'gpt-5.1', 'max' ) && 'high' === OGM_GPDM_AI::effort_for( 'openai', 'o3', 'max' ) );
 check( 'effort: max passes through on gpt-6+', 'max' === OGM_GPDM_AI::effort_for( 'openai', 'gpt-6-astra', 'max' ) );
 check( 'effort: omitted for models that take none', null === OGM_GPDM_AI::effort_for( 'openai', 'gpt-4o', 'high' ) && null === OGM_GPDM_AI::effort_for( 'anthropic', 'claude-haiku-4-5', 'high' ) );
+check( 'effort: Claude Haiku 5.5 and Opus 5.5 take it (1.7.1)', 'high' === OGM_GPDM_AI::effort_for( 'anthropic', 'claude-haiku-5-5', 'high' ) && 'max' === OGM_GPDM_AI::effort_for( 'anthropic', 'claude-opus-5-5', 'max' ) );
 check( 'effort: bogus setting falls back to medium', 'medium' === OGM_GPDM_AI::effort_for( 'anthropic', 'claude-opus-5', 'turbo' ) );
-check( 'effort: timeouts scale and stay inside the run window', 120 === OGM_GPDM_AI::effort_timeout( 'low' ) && 180 === OGM_GPDM_AI::effort_timeout( 'medium' ) && 420 === OGM_GPDM_AI::effort_timeout( 'high' ) && 840 === OGM_GPDM_AI::effort_timeout( 'max' ) && OGM_GPDM_AI::effort_timeout( 'max' ) < OGM_GPDM_AI::RUN_TIMEOUT );
+check( 'effort: timeouts scale and stay inside the run window', 240 === OGM_GPDM_AI::effort_timeout( 'low' ) && 420 === OGM_GPDM_AI::effort_timeout( 'medium' ) && 660 === OGM_GPDM_AI::effort_timeout( 'high' ) && 840 === OGM_GPDM_AI::effort_timeout( 'max' ) && 240 === OGM_GPDM_AI::effort_timeout( null ) && OGM_GPDM_AI::effort_timeout( 'max' ) < OGM_GPDM_AI::RUN_TIMEOUT );
 
-check( 'seed models: defaults lead each list', 'claude-opus-5' === OGM_GPDM_AI::seed_models( 'anthropic' )[0] && 'gpt-5' === OGM_GPDM_AI::seed_models( 'openai' )[0] );
+// v1.7.1: the reply allowance scales with effort — thinking counts against it
+// (Opus 5.5 at High ran out of a fixed 16,000 before writing any CSS).
+check( 'max_tokens: allowance scales with effort', 16000 === OGM_GPDM_AI::max_tokens( 'low' ) && 32000 === OGM_GPDM_AI::max_tokens( 'medium' ) && 48000 === OGM_GPDM_AI::max_tokens( 'high' ) && 64000 === OGM_GPDM_AI::max_tokens( 'max' ) && 64000 === OGM_GPDM_AI::max_tokens( 'xhigh' ) );
+check( 'max_tokens: models without effort keep 16,000 (gpt-4o ceiling 16,384)', 16000 === OGM_GPDM_AI::max_tokens( null ) && OGM_GPDM_AI::max_tokens( null ) <= 16384 );
+$fits = true;
+foreach ( array( null, 'low', 'medium', 'high', 'xhigh', 'max' ) as $e ) {
+	// The whole allowance at ~100 output tokens/s (measured) must fit the HTTP timeout.
+	$fits = $fits && ( OGM_GPDM_AI::max_tokens( $e ) / 100 ) < OGM_GPDM_AI::effort_timeout( $e );
+}
+check( 'max_tokens: every allowance can be spent inside its timeout', $fits );
+
+$prov = OGM_GPDM_AI::providers();
+check( 'seed models: current lineups, defaults lead each list', 'claude-opus-5-5' === OGM_GPDM_AI::seed_models( 'anthropic' )[0] && 'gpt-6.1-sol' === OGM_GPDM_AI::seed_models( 'openai' )[0] && $prov['anthropic']['default_model'] === OGM_GPDM_AI::seed_models( 'anthropic' )[0] && $prov['openai']['default_model'] === OGM_GPDM_AI::seed_models( 'openai' )[0] );
+check( 'seed models: OpenAI seed is already in ranked order (refresh keeps the default on top)', OGM_GPDM_AI::seed_models( 'openai' ) === OGM_GPDM_AI::rank_openai_models( OGM_GPDM_AI::seed_models( 'openai' ) ) );
+check( 'seed models: every Claude seed takes effort', null !== OGM_GPDM_AI::effort_for( 'anthropic', 'claude-fable-5-1', '' ) && null !== OGM_GPDM_AI::effort_for( 'anthropic', 'claude-sonnet-5-5', '' ) && null !== OGM_GPDM_AI::effort_for( 'anthropic', 'claude-haiku-5-5', '' ) );
 
 check( 'ai: prose-only response rejected', null === OGM_GPDM_AI::extract_css( 'I could not find any problems worth fixing.' ) );
 check( 'ai: empty response rejected', null === OGM_GPDM_AI::extract_css( '' ) );

@@ -21,6 +21,15 @@ final class OGM_GPDM_Palette {
 	/** Reference dark surface used for contrast checks (framework --bg). */
 	const DARK_REF = '#0f0f12';
 
+	/**
+	 * The framework's built-in accent (--dm-accent in gp-dark-mode.css). Its
+	 * companions there — toggle hover #0056ff / #122666, dark link #9ad,
+	 * dark alternate surface #17284f — were hand-tuned for this accent on the
+	 * reference site, so a site whose accent IS this color keeps that set
+	 * instead of close-but-not-identical derivations.
+	 */
+	const BUILTIN_ACCENT = '#1d428a';
+
 	/* ---------------------------------------------------------------------
 	 * Generation
 	 * ------------------------------------------------------------------- */
@@ -36,19 +45,40 @@ final class OGM_GPDM_Palette {
 		}
 
 		$palette = self::derive_palette( $colors, self::usage_roles( $colors ) );
+		$tokens  = self::derive_tokens( $palette, self::find_accent( $colors, (array) get_option( 'generate_settings', array() ) ) );
 
-		if ( empty( $palette['map'] ) ) {
+		if ( empty( $palette['map'] ) && empty( $tokens['root'] ) && empty( $tokens['dark'] ) ) {
 			return '';
-		}
-
-		$lines = array();
-		foreach ( $palette['map'] as $slug => $entry ) {
-			$lines[] = "\t--" . $slug . ': ' . $entry['dark'] . '; /* from ' . $entry['from'] . ' (' . $entry['class'] . ') */';
 		}
 
 		$css  = "/* Generated dark palette (Layer 2) — derived from the GeneratePress Global\n";
 		$css .= "   Colors. Regenerate from Settings → GP Dark Mode after changing them. */\n";
-		$css .= "html[data-theme=\"dark\"] {\n" . implode( "\n", $lines ) . "\n}\n";
+
+		if ( ! empty( $palette['map'] ) ) {
+			$lines = array();
+			foreach ( $palette['map'] as $slug => $entry ) {
+				$lines[] = "\t--" . $slug . ': ' . $entry['dark'] . '; /* from ' . $entry['from'] . ' (' . $entry['class'] . ') */';
+			}
+			$css .= "html[data-theme=\"dark\"] {\n" . implode( "\n", $lines ) . "\n}\n";
+		}
+
+		if ( ! empty( $tokens['root'] ) || ! empty( $tokens['dark'] ) ) {
+			$css .= "/* The plugin's own colors (toggle, dark links, alternate surfaces), derived\n";
+			$css .= "   from the same palette instead of the framework's built-in blues. */\n";
+			foreach ( array( ':root' => $tokens['root'], 'html[data-theme="dark"]' => $tokens['dark'] ) as $selector => $set ) {
+				if ( empty( $set ) ) {
+					continue;
+				}
+				$lines = array();
+				foreach ( $set as $name => $entry ) {
+					$lines[] = "\t" . $name . ': ' . $entry[0] . '; /* ' . $entry[1] . ' */';
+				}
+				$css .= $selector . " {\n" . implode( "\n", $lines ) . "\n}\n";
+			}
+		}
+		foreach ( $tokens['notes'] as $note ) {
+			$css .= '/* ' . $note . " */\n";
+		}
 
 		if ( ! empty( $palette['kept'] ) ) {
 			$css .= '/* Left unchanged (already dark-mode-appropriate as-is): ' . implode( ', ', $palette['kept'] ) . " */\n";
@@ -75,11 +105,12 @@ final class OGM_GPDM_Palette {
 	 * @param array $colors GP global colors: [{slug, color}, …].
 	 * @param array $usage  Optional usage_roles() result: slug => roles. How a
 	 *                      color is actually used overrides its slug name.
-	 * @return array {map: slug => {dark, from, class}, kept: [], unclassified: [], unparseable: []}
+	 * @return array {map: slug => {dark, from, class}, surfaces: slugs in rank order, kept: [], unclassified: [], unparseable: []}
 	 */
 	public static function derive_palette( array $colors, array $usage = array() ) {
 		$out = array(
 			'map'          => array(),
+			'surfaces'     => array(),
 			'kept'         => array(),
 			'unclassified' => array(),
 			'unparseable'  => array(),
@@ -175,6 +206,7 @@ final class OGM_GPDM_Palette {
 				'from'  => $surface['hex'],
 				'class' => 'surface, rank ' . ( $i + 1 ),
 			);
+			$out['surfaces'][] = $surface['slug'];
 		}
 
 		// Texts: darkest light-mode text (the primary color) becomes the
@@ -209,6 +241,158 @@ final class OGM_GPDM_Palette {
 				'class' => 'text, rank ' . ( $i + 1 ),
 			);
 		}
+
+		return $out;
+	}
+
+	/**
+	 * The site's accent: the color its links (else its buttons) are painted
+	 * with in the GeneratePress settings, else a Global Color whose slug
+	 * names it (accent / primary / brand). Neutral candidates — grays,
+	 * near-black, near-white — are skipped: a site with black links has no
+	 * accent to derive the toggle from.
+	 *
+	 * @param array $colors   GP global colors: [{slug, color}, …].
+	 * @param array $settings The generate_settings option.
+	 * @return array|null {hex, from} or null when the site has no accent.
+	 */
+	public static function find_accent( array $colors, array $settings ) {
+		$by_slug = array();
+		foreach ( $colors as $color ) {
+			$rgb = self::parse_color( isset( $color['color'] ) ? $color['color'] : '' );
+			if ( ! empty( $color['slug'] ) && null !== $rgb ) {
+				$by_slug[ strtolower( (string) $color['slug'] ) ] = sprintf( '#%02x%02x%02x', $rgb[0], $rgb[1], $rgb[2] );
+			}
+		}
+
+		$candidates = array();
+		foreach ( array( 'link_color' => 'the link color', 'form_button_background_color' => 'the button color' ) as $key => $label ) {
+			if ( ! empty( $settings[ $key ] ) && is_string( $settings[ $key ] ) ) {
+				$candidates[] = array( $settings[ $key ], $label );
+			}
+		}
+		foreach ( array_keys( $by_slug ) as $slug ) {
+			if ( preg_match( '~accent|primary|brand~', $slug ) ) {
+				$candidates[] = array( 'var(--' . $slug . ')', 'its slug' );
+			}
+		}
+
+		foreach ( $candidates as $candidate ) {
+			list( $value, $label ) = $candidate;
+			if ( preg_match( '~^\s*var\(\s*--([a-z0-9_-]+)~i', $value, $m ) ) {
+				$slug = strtolower( $m[1] );
+				if ( ! isset( $by_slug[ $slug ] ) ) {
+					continue;
+				}
+				$hex  = $by_slug[ $slug ];
+				$from = '--' . $slug . ', by ' . $label;
+			} else {
+				$rgb = self::parse_color( $value );
+				if ( null === $rgb ) {
+					continue;
+				}
+				$hex  = sprintf( '#%02x%02x%02x', $rgb[0], $rgb[1], $rgb[2] );
+				$from = $label;
+			}
+			$hsl = self::hex_to_hsl( $hex );
+			if ( $hsl[1] < 0.25 || $hsl[2] < 0.12 || $hsl[2] > 0.88 ) {
+				continue;
+			}
+			return array( 'hex' => $hex, 'from' => $from );
+		}
+
+		return null;
+	}
+
+	/**
+	 * The plugin's OWN tokens, derived from the site palette — so the toggle,
+	 * dark-mode links and alternate surfaces stop carrying the framework's
+	 * built-in blues on sites with other colors.
+	 *
+	 * - --dm-accent (toggle track): the accent itself.
+	 * - --dm-glow (toggle hover): light mode, the accent's hue more saturated
+	 *   and lighter, kept dark enough for the white icons (3:1); dark mode,
+	 *   the accent's hue deep.
+	 * - --bg-2 / --surface-2, dark (current menu item, form fields, author
+	 *   box): the second-ranked dark surface; without one, a dark tint of
+	 *   the accent.
+	 * - --link, dark: the accent's hue, lightened to 4.5:1 against every dark
+	 *   surface it can sit on.
+	 *
+	 * @param array      $palette derive_palette() result.
+	 * @param array|null $accent  find_accent() result.
+	 * @return array {root: name => [value, note], dark: name => [value, note], notes: string[]}
+	 */
+	public static function derive_tokens( array $palette, $accent ) {
+		$out = array(
+			'root'  => array(),
+			'dark'  => array(),
+			'notes' => array(),
+		);
+
+		if ( null !== $accent && self::BUILTIN_ACCENT === self::normalize_hex( $accent['hex'] ) ) {
+			$out['notes'][] = 'Plugin colors: the site accent (' . $accent['from'] . ', ' . $accent['hex'] . ') is the framework\'s built-in accent — its hand-tuned toggle, dark link and alternate-surface colors are kept.';
+			return $out;
+		}
+
+		// The dark surfaces derived colors must read against.
+		$surfaces = isset( $palette['surfaces'] ) ? $palette['surfaces'] : array();
+		$refs     = array( self::DARK_REF );
+		if ( isset( $surfaces[0], $palette['map'][ $surfaces[0] ] ) ) {
+			$refs[] = $palette['map'][ $surfaces[0] ]['dark'];
+		}
+
+		$alt = null;
+		if ( isset( $surfaces[1], $palette['map'][ $surfaces[1] ] ) ) {
+			$alt  = $palette['map'][ $surfaces[1] ]['dark'];
+			$note = 'from --' . $surfaces[1] . ' (surface, rank 2)';
+		} elseif ( null !== $accent ) {
+			$hsl  = self::hex_to_hsl( $accent['hex'] );
+			$alt  = self::hsl_to_hex( $hsl[0], min( $hsl[1], 0.55 ), 0.20 );
+			$note = 'accent hue, dark (the palette has no second surface)';
+		}
+		if ( null !== $alt ) {
+			$out['dark']['--bg-2']      = array( $alt, $note );
+			$out['dark']['--surface-2'] = array( $alt, $note );
+			$refs[]                     = $alt;
+		}
+
+		if ( null === $accent ) {
+			$out['notes'][] = 'Plugin colors: no accent found (a colored link or button setting, or a Global Color named accent, primary or brand) — the toggle and dark links keep the framework\'s built-in colors.';
+			return $out;
+		}
+
+		list( $h, $s, $l ) = self::hex_to_hsl( $accent['hex'] );
+
+		$out['root']['--dm-accent'] = array( $accent['hex'], 'toggle track: the site accent (' . $accent['from'] . ')' );
+
+		$gs    = min( 1.0, $s + 0.35 );
+		$gl    = max( 0.50, $l + 0.12 );
+		$glow  = self::hsl_to_hex( $h, $gs, $gl );
+		$guard = 0;
+		while ( self::contrast_ratio( '#ffffff', $glow ) < 3 && $gl > 0.20 && $guard < 40 ) {
+			$gl  -= 0.01;
+			$glow = self::hsl_to_hex( $h, $gs, $gl );
+			$guard++;
+		}
+		$out['root']['--dm-glow'] = array( $glow, 'toggle hover: accent hue, brighter, white icons >= 3:1' );
+		$out['dark']['--dm-glow'] = array( self::hsl_to_hex( $h, min( $s, 0.70 ), 0.235 ), 'toggle hover in dark mode: accent hue, deep' );
+
+		$ls    = min( $s, 0.55 );
+		$ll    = max( 0.72, $l );
+		$link  = self::hsl_to_hex( $h, $ls, $ll );
+		$worst = function ( $hex ) use ( $refs ) {
+			return min( array_map( function ( $ref ) use ( $hex ) {
+				return self::contrast_ratio( $hex, $ref );
+			}, $refs ) );
+		};
+		$guard = 0;
+		while ( $worst( $link ) < 4.5 && $ll < 0.98 && $guard < 20 ) {
+			$ll  += 0.02;
+			$link = self::hsl_to_hex( $h, $ls, $ll );
+			$guard++;
+		}
+		$out['dark']['--link'] = array( $link, 'links: accent hue, lightened to >= 4.5:1 on the dark surfaces' );
 
 		return $out;
 	}

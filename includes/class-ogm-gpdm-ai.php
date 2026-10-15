@@ -117,38 +117,60 @@ final class OGM_GPDM_AI {
 	/** Providers and their default models. */
 	public static function providers() {
 		return array(
-			'anthropic' => array( 'label' => 'Anthropic (Claude)', 'default_model' => 'claude-opus-5' ),
-			'openai'    => array( 'label' => 'OpenAI', 'default_model' => 'gpt-5' ),
+			'anthropic' => array( 'label' => 'Anthropic (Claude)', 'default_model' => 'claude-opus-5-5' ),
+			'openai'    => array( 'label' => 'OpenAI', 'default_model' => 'gpt-6.1-sol' ),
 		);
 	}
 
-	/** Default model for a provider. */
+	/**
+	 * Default model for a provider. The hardcoded ids cover a fresh install;
+	 * once a refresh has run, the default tracks the provider's lineup so it
+	 * doesn't go stale. OpenAI: the top of the ranked cache (the newest
+	 * major.minor family). Anthropic: the newest Opus in the cache — Opus is
+	 * the tier Anthropic recommends for most work, while the ranked top
+	 * (Fable, or a restricted tier) costs more.
+	 */
 	public static function default_model( $provider ) {
 		$providers = self::providers();
-		$fallback  = isset( $providers[ $provider ] ) ? $providers[ $provider ]['default_model'] : 'claude-opus-5';
-		// OpenAI ships new flagship families often; once a refresh has run, the
-		// top of the ranked cache IS the current lineup's newest model, so
-		// "Provider default" tracks it instead of a hardcoded id that goes
-		// stale. Anthropic's default stays pinned to Opus (the ranked top can
-		// be a restricted tier).
+		$fallback  = isset( $providers[ $provider ] ) ? $providers[ $provider ]['default_model'] : 'claude-opus-5-5';
+		$ids       = self::models_cache( 'openai' === $provider ? 'openai' : 'anthropic' )['ids'];
 		if ( 'openai' === $provider ) {
-			$ids = self::models_cache( 'openai' )['ids'];
 			if ( ! empty( $ids ) ) {
 				return (string) $ids[0];
 			}
+		} else {
+			foreach ( $ids as $id ) {
+				if ( preg_match( '/^claude-opus-\d/', $id ) ) {
+					return (string) $id; // Ranked newest-first within the family.
+				}
+			}
 		}
 		return $fallback;
+	}
+
+	/**
+	 * Claude models that take the effort parameter and the server-side
+	 * refusal fallback: the 5 family plus Opus 4.6–4.8 and Sonnet 4.6. Haiku
+	 * 5.5 has no fallback target of its own, but the API accepts
+	 * fallbacks:"default" there and simply keeps the refusal.
+	 */
+	private static function is_effort_claude( $model ) {
+		return (bool) preg_match( '/^claude-(fable|opus-5|opus-4-[6-8]|sonnet-5|sonnet-4-6|haiku-5)/', strtolower( (string) $model ) );
 	}
 
 	/* ---------------------------------------------------------------------
 	 * Model lists (dropdown + refresh — Editorial QA pattern)
 	 * ------------------------------------------------------------------- */
 
-	/** Seed model lists, shown until the first "Refresh models". */
+	/**
+	 * Seed model lists, shown until the first "Refresh models" — each
+	 * provider's current lineup (checked 2026-10-14), default first. gpt-5
+	 * stays for keys without GPT-6 access.
+	 */
 	public static function seed_models( $provider ) {
 		return 'openai' === $provider
-			? array( 'gpt-5', 'gpt-4o', 'gpt-4o-mini', 'gpt-4.1' )
-			: array( 'claude-opus-5', 'claude-sonnet-5', 'claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5' );
+			? array( 'gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-luna', 'gpt-5' )
+			: array( 'claude-opus-5-5', 'claude-fable-5-1', 'claude-sonnet-5-5', 'claude-haiku-5-5' );
 	}
 
 	/** Cached model entry for a provider: ['ids' => string[], 'updated' => int]. */
@@ -587,7 +609,7 @@ final class OGM_GPDM_AI {
 				return null;
 			}
 		} else {
-			if ( ! preg_match( '/^claude-(fable|opus-5|opus-4-[6-8]|sonnet-5|sonnet-4-6)/', $model ) ) {
+			if ( ! self::is_effort_claude( $model ) ) {
 				return null;
 			}
 			$effort = $setting;
@@ -601,31 +623,105 @@ final class OGM_GPDM_AI {
 		return $effort;
 	}
 
-	/** HTTP timeout (seconds) for one provider call, scaled with effort; always inside RUN_TIMEOUT. */
+	/**
+	 * HTTP timeout (seconds) for one provider call, scaled with effort; always
+	 * inside RUN_TIMEOUT. Each step leaves room to spend the whole
+	 * max_tokens() allowance at ~100 output tokens/s (measured 2026-10-14:
+	 * Claude Opus 5.5 at High wrote 16,000 tokens in 157 s behind a
+	 * ~30k-token bundle).
+	 */
 	public static function effort_timeout( $effort ) {
 		switch ( $effort ) {
 			case 'low':
-				return 120;
-			case 'high':
+				return 240;
+			case 'medium':
 				return 420;
+			case 'high':
+				return 660;
 			case 'xhigh':
 			case 'max':
 				return 840;
 			default:
-				return 180;
+				return 240;
 		}
 	}
 
-	/** The response token budget (filterable — see the truncation errors). */
-	private static function max_tokens() {
-		return max( 4000, (int) apply_filters( 'ogm_gpdm_ai_max_tokens', 16000 ) );
+	/**
+	 * The output-token allowance for one call, scaled with effort. On
+	 * reasoning models it covers the thinking AND the stylesheet — Claude
+	 * Opus 5.5 thinks on every request and can't be told not to — so the old
+	 * fixed 16,000 ran out at High before any CSS was written. Models that
+	 * take no effort keep 16,000 (gpt-4o's ceiling is 16,384). Filterable via
+	 * ogm_gpdm_ai_max_tokens( $tokens, $provider, $model, $effort ); clamped
+	 * to 4,000–128,000 (the largest synchronous output any listed model takes).
+	 */
+	public static function max_tokens( $effort = null, $provider = '', $model = '' ) {
+		switch ( $effort ) {
+			case 'medium':
+				$tokens = 32000;
+				break;
+			case 'high':
+				$tokens = 48000;
+				break;
+			case 'xhigh':
+			case 'max':
+				$tokens = 64000;
+				break;
+			default: // low, or a model that takes no effort.
+				$tokens = 16000;
+		}
+		if ( function_exists( 'apply_filters' ) ) {
+			$tokens = (int) apply_filters( 'ogm_gpdm_ai_max_tokens', $tokens, $provider, $model, $effort );
+		}
+		return min( 128000, max( 4000, $tokens ) );
+	}
+
+	/**
+	 * The error for a reply cut off at the token allowance. Says what ran out
+	 * (thinking counts against it) and what to change in the UI; the filter
+	 * is for developers.
+	 */
+	private static function truncated_error( $budget, $effort ) {
+		$amount = function_exists( 'number_format_i18n' ) ? number_format_i18n( $budget ) : number_format( $budget );
+		$advice = in_array( $effort, array( 'medium', 'high', 'xhigh', 'max' ), true )
+			? __( 'Run it again at a lower Effort setting, or pick a faster model.', 'gp-dark-mode' )
+			: __( 'Run it again with a different model.', 'gp-dark-mode' );
+		return new WP_Error(
+			'ogm_gpdm_ai_truncated',
+			sprintf(
+				/* translators: 1: number of tokens, 2: what to try next. */
+				__( 'The model used its whole reply allowance (%1$s tokens, which covers its thinking as well as the stylesheet) before it finished, so nothing was stored. %2$s Developers can raise the allowance with the ogm_gpdm_ai_max_tokens filter.', 'gp-dark-mode' ),
+				$amount,
+				$advice
+			)
+		);
+	}
+
+	/**
+	 * A transport error from wp_remote_post(), with a timeout explained in
+	 * the same terms as the Effort setting instead of a raw cURL message.
+	 */
+	private static function transport_error( WP_Error $err, $effort ) {
+		if ( false === stripos( $err->get_error_message(), 'timed out' ) ) {
+			return $err;
+		}
+		$minutes = (int) round( self::effort_timeout( $effort ) / 60 );
+		return new WP_Error(
+			'ogm_gpdm_ai_timeout',
+			sprintf(
+				/* translators: %d: number of minutes. */
+				__( 'The model was still working when the %d-minute limit for this Effort setting ran out, so nothing was stored. Run it again at a lower Effort setting, or pick a faster model.', 'gp-dark-mode' ),
+				$minutes
+			)
+		);
 	}
 
 	/** Call the Anthropic Messages API. Returns response text or WP_Error. */
 	private static function call_anthropic( $key, $model, $system, $user, $effort = null ) {
-		$body = array(
+		$budget = self::max_tokens( $effort, 'anthropic', $model );
+		$body   = array(
 			'model'      => $model,
-			'max_tokens' => self::max_tokens(),
+			'max_tokens' => $budget,
 			'system'     => $system,
 			'messages'   => array(
 				array(
@@ -641,7 +737,7 @@ final class OGM_GPDM_AI {
 			'anthropic-version' => '2023-06-01',
 		);
 
-		if ( preg_match( '~^claude-(fable|opus-5|opus-4-[6-8]|sonnet-5|sonnet-4-6)~', $model ) ) {
+		if ( self::is_effort_claude( $model ) ) {
 			// Server-side refusal fallbacks: if a safety classifier declines,
 			// the API retries a category-appropriate fallback model itself.
 			$headers['anthropic-beta'] = 'server-side-fallback-2026-07-01';
@@ -663,7 +759,7 @@ final class OGM_GPDM_AI {
 		);
 
 		if ( is_wp_error( $res ) ) {
-			return $res;
+			return self::transport_error( $res, $effort );
 		}
 
 		$code = (int) wp_remote_retrieve_response_code( $res );
@@ -683,7 +779,7 @@ final class OGM_GPDM_AI {
 		// A truncated reply must NEVER become a proposal: half a stylesheet
 		// applied as a complete replacement silently deletes the tail rules.
 		if ( is_array( $json ) && isset( $json['stop_reason'] ) && 'max_tokens' === $json['stop_reason'] ) {
-			return new WP_Error( 'ogm_gpdm_ai_truncated', __( 'The response hit the token limit and would be incomplete — nothing was stored. Raise the limit via the ogm_gpdm_ai_max_tokens filter, or trim the Additional CSS before reviewing.', 'gp-dark-mode' ) );
+			return self::truncated_error( $budget, $effort );
 		}
 
 		if ( ! is_array( $json ) || empty( $json['content'] ) || ! is_array( $json['content'] ) ) {
@@ -701,9 +797,10 @@ final class OGM_GPDM_AI {
 
 	/** Call the OpenAI Chat Completions API. Returns response text or WP_Error. */
 	private static function call_openai( $key, $model, $system, $user, $effort = null ) {
-		$body = array(
+		$budget = self::max_tokens( $effort, 'openai', $model );
+		$body   = array(
 			'model'                 => $model,
-			'max_completion_tokens' => self::max_tokens(),
+			'max_completion_tokens' => $budget,
 			'messages'              => array(
 				array( 'role' => 'system', 'content' => $system ),
 				array( 'role' => 'user', 'content' => $user ),
@@ -729,7 +826,7 @@ final class OGM_GPDM_AI {
 		);
 
 		if ( is_wp_error( $res ) ) {
-			return $res;
+			return self::transport_error( $res, $effort );
 		}
 
 		$code = (int) wp_remote_retrieve_response_code( $res );
@@ -745,7 +842,7 @@ final class OGM_GPDM_AI {
 
 		// Truncated reply — see the Anthropic max_tokens check above.
 		if ( isset( $json['choices'][0]['finish_reason'] ) && 'length' === $json['choices'][0]['finish_reason'] ) {
-			return new WP_Error( 'ogm_gpdm_ai_truncated', __( 'The response hit the token limit and would be incomplete — nothing was stored. Raise the limit via the ogm_gpdm_ai_max_tokens filter, or trim the Additional CSS before reviewing.', 'gp-dark-mode' ) );
+			return self::truncated_error( $budget, $effort );
 		}
 
 		return (string) $json['choices'][0]['message']['content'];

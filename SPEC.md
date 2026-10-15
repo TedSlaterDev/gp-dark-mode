@@ -25,11 +25,23 @@ proof of the behaviors described here.
   `.dm-track > .dm-icon.dm-sun + .dm-icon.dm-moon + .dm-knob`. Icons are inline
   SVGs (1.4.1) — text glyphs render per-site fonts and looked different on
   every site. The toggle JS binds EVERY `.dm-toggle` (GeneratePress renders the
-  menu bar in multiple navs). Placement: `generate_menu_bar_items` @20 or the
-  `[gp_dark_mode_toggle]` shortcode. Filter: `ogm_gpdm_toggle_markup`.
+  menu bar in multiple navs). Placement: `generate_menu_bar_items` @20, the
+  `[gp_dark_mode_toggle]` shortcode, or the **Dark Mode Toggle block** (1.7.0,
+  `gp-dark-mode/toggle`, `blocks/toggle/`): apiVersion 3, server-rendered
+  (`save` returns null; `render_toggle_block()` wraps the shortcode output in
+  `get_block_wrapper_attributes()` so margin/className supports apply; renders
+  regardless of `show_toggle`). Editor script is plain ES5 on WP globals with a
+  hand-written `index.asset.php` (no build step); `editor.css` styles a static
+  preview. Why: GP Premium Site Header Block Elements (incl. GB Pro Site Header
+  + Navigation headers) replace GP's nav, so `generate_menu_bar_items` never
+  fires there; the Settings tab detects a published `gp_elements` post with
+  `_generate_block_type = site-header` and points to the block. Filter:
+  `ogm_gpdm_toggle_markup`.
 - Palette tokens: `--bg --bg-2 --surface --surface-2 --text --text-muted
-  --border --link --dm-accent` (light values on `:root`, dark under
-  `html[data-theme="dark"]`).
+  --border --link --dm-accent --dm-glow` (light values on `:root`, dark under
+  `html[data-theme="dark"]`). `--dm-glow` (1.8.0) is the toggle's hover fill
+  (#0056ff light / #122666 dark built in — the old literals, so the toggle
+  renders pixel-identically).
 
 ## 2. The five stylesheet layers (cascade order)
 
@@ -43,7 +55,7 @@ themes fall back to a late standalone stylesheet.
 | # | Layer | Source | Toggle | Notes |
 |---|-------|--------|--------|-------|
 | 1 | Framework | `assets/css/gp-dark-mode.css` | always | Mechanics + tokens + toggle component. **INERT in light mode** (1.3.2): every global rule is dark-scoped. The self-referential `--accent: var(--accent, #1d428a)` is kept verbatim — GP's dynamic CSS redefines it later so it stays valid (brand color on the reference site); on themes without `--accent` it computes to transparent. |
-| 2 | Generated palette | option `ogm_gpdm_generated_css` (GEN_KEY, autoloaded) | `enable_generated` (default 0 — opt-in, review first) | `OGM_GPDM_Palette::generate()`: GP Global Colors → RANK-BASED dark ramps (never naive inversion — it collapses GP's near-white surface ramp). Surfaces: lightest→darkest, L = 0.07 + 0.045·rank. Text tiers: 0.92 − 0.10·rank with WCAG floors (4.5:1 primary, 3:1 others). Classification is USAGE-AWARE: `usage_roles()` reads where each color is actually used (GP settings values holding `var(--slug)` or the literal hex, keyed background→surface / text·title·link→text; plus `background*: var(--slug)` / `color: var(--slug)` in Customizer CSS and child style.css) and real usage overrides the slug-name guess — slug names lie (live case: a dark site header painted with `var(--contrast)`). Conflicting usage (both roles) → left unchanged with a note; utility and brand classes are exempt from overrides. Already-light text, ALREADY-DARK surfaces (L ≤ 0.32 — mirror rule; inverting them would lighten a deliberately dark header/footer), `white`/`black` utility slugs, and readable brand colors (≥3:1) stay untouched; too-dark brands are lightened to 3:1. Saturated colors in text slots keep hue strength (s cap 0.55 when s ≥ 0.40). `rgb()/rgba()` parsed; unparseable/unclassified colors are listed in output comments, never silently dropped. |
+| 2 | Generated palette | option `ogm_gpdm_generated_css` (GEN_KEY, autoloaded) | `enable_generated` (default 0 — opt-in, review first) | `OGM_GPDM_Palette::generate()`: GP Global Colors → RANK-BASED dark ramps (never naive inversion — it collapses GP's near-white surface ramp). Surfaces: lightest→darkest, L = 0.07 + 0.045·rank. Text tiers: 0.92 − 0.10·rank with WCAG floors (4.5:1 primary, 3:1 others). Classification is USAGE-AWARE: `usage_roles()` reads where each color is actually used (GP settings values holding `var(--slug)` or the literal hex, keyed background→surface / text·title·link→text; plus `background*: var(--slug)` / `color: var(--slug)` in Customizer CSS and child style.css) and real usage overrides the slug-name guess — slug names lie (live case: a dark site header painted with `var(--contrast)`). Conflicting usage (both roles) → left unchanged with a note; utility and brand classes are exempt from overrides. Already-light text, ALREADY-DARK surfaces (L ≤ 0.32 — mirror rule; inverting them would lighten a deliberately dark header/footer), `white`/`black` utility slugs, and readable brand colors (≥3:1) stay untouched; too-dark brands are lightened to 3:1. Saturated colors in text slots keep hue strength (s cap 0.55 when s ≥ 0.40). `rgb()/rgba()` parsed; unparseable/unclassified colors are listed in output comments, never silently dropped. **Plugin tokens (1.8.0)** — a second block (`derive_tokens()`) recolors the plugin's own pieces from the site: `find_accent()` = the color `link_color` resolves to, else `form_button_background_color`, else a Global Color whose slug says accent/primary/brand (neutral candidates — s < 0.25, L < 0.12 or > 0.88 — skipped). `:root` gets `--dm-accent` = accent and `--dm-glow` = accent hue, s + 0.35, L ≥ 0.50, lowered until white icons reach 3:1; dark gets `--dm-glow` = accent hue at L 0.235, `--link` = accent hue (s ≤ 0.55) from L 0.72 up to 4.5:1 against DARK_REF, the rank-1 surface and `--bg-2`, and `--bg-2`/`--surface-2` = the rank-2 surface (else an accent tint at L 0.20). A site whose accent IS the framework's built-in `#1d428a` (`BUILTIN_ACCENT`) emits none of these — its companions were hand-tuned for it (the reference site regenerates to an identical look); no accent → toggle/link tokens stay built-in, with a note. |
 | 3 | Integration modules | `assets/css/modules/*.css` | `modules[slug]` checkboxes | Registry in `OGM_GP_Dark_Mode::modules()`: gp-chrome (default on), revcontent (manual — script-injected, undetectable), ad-inserter / givewp / forminator (auto-detected ON at fresh activation only). Written against vendors' STABLE generic selectors; per-placement selectors belong in Layer 4b. Plugin-versioned: fixes ship to every site. |
 | 4a | AI stylesheet | option `ogm_gpdm_ai_css` (autoloaded) | `enable_ai_css` (default 1) | Machine-owned. Each accepted proposal replaces it wholesale. Backup/swap (`ogm_gpdm_ai_backup`) operates on THIS layer only. |
 | 4b | Manual CSS | setting `custom_css` | `enable_custom_css` (default 1) | The owner's layer. Loads LAST, always wins, never touched by the AI. Starts EMPTY — since 1.6.0 the plugin ships no site-specific CSS; the reference site's old residue is a test fixture (`tests/fixtures/theme-manual-css.css`), pasted into that site's own Manual tab at deploy. |
@@ -119,11 +131,24 @@ chars, prefills next run) → status=running → `wp_schedule_single_event` +
 2. Prompt: system = role + output contract (deliverable replaces Layer 4a;
    Layer 4b is read-only context that always wins); user = task + owner
    instructions (top priority) + bundle.
-3. Provider call: Anthropic Messages API (default `claude-opus-5`,
-   server-side refusal fallbacks beta, effort `medium` via
-   `ogm_gpdm_ai_effort` filter) or OpenAI chat completions (default `gpt-5`,
-   reasoning_effort low). `ogm_gpdm_ai_max_tokens` filter (default 16000,
-   min 4000). Refusals and truncation are surfaced as errors.
+3. Provider call: Anthropic Messages API (default `claude-opus-5-5`, after a
+   refresh the newest cached `claude-opus-*`; effort + fallbacks only for
+   `is_effort_claude()` ids — 5 family incl. Haiku 5.5, Opus 4.6–4.8, Sonnet 4.6;
+   server-side refusal fallbacks beta, effort from the Effort setting via
+   `effort_for()`, `ogm_gpdm_ai_effort` filter) or OpenAI chat completions
+   (default `gpt-6.1-sol`, after a refresh the ranked cache's top;
+   reasoning_effort likewise). Seed lists (`seed_models()`, pre-refresh) =
+   each provider's current lineup, default first; OpenAI's seed must stay in
+   `rank_openai_models()` order (unit-tested). **Reply allowance scales with
+   effort** (`max_tokens()`, 1.7.1): low/none 16000, medium 32000, high 48000,
+   xhigh/max 64000; filter `ogm_gpdm_ai_max_tokens( $tokens, $provider,
+   $model, $effort )`, clamped 4000–128000. Why: reasoning models count
+   thinking against it and Opus 5.5 always thinks — a fixed 16000 ran out at
+   High before any CSS (AFS, 2026-10-14: 16k in 157 s). `effort_timeout()`
+   (240/420/660/840 s) keeps every allowance spendable at ~100 tok/s inside
+   RUN_TIMEOUT 900. Refusals, truncation (`truncated_error()`: names the
+   allowance, suggests a lower Effort) and transport timeouts
+   (`transport_error()`: "N-minute limit") are surfaced as errors.
 4. `extract_css`: largest fenced CSS block wins; prose before it = notes;
    unfenced pure CSS accepted only when NO fence appears anywhere.
 5. Proposal stored (`ogm_gpdm_ai_proposal`) → page polls
@@ -196,6 +221,7 @@ assets/css/gp-dark-mode.css          Layer 1 framework
 assets/css/modules/*.css             Layer 3 integration modules
 tests/fixtures/theme-manual-css.css    reference-site residue (fixture, not shipped)
 assets/js/dark-mode-toggle.js        Front-end toggle behavior
+blocks/toggle/                       Dark Mode Toggle block (block.json, index.js, index.asset.php, editor.css)
 assets/admin/gp-dark-mode-admin.*    Settings-page CSS/JS (tabs, models, review polling)
 tests/                               run.sh + unit/coverage/smoke + fixtures
 uninstall.php                        Full cleanup, multisite-aware

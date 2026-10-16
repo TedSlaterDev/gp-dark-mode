@@ -300,6 +300,19 @@ a.button.ogm-gpdm-danger-btn:hover {
 	color: #8c8f94;
 	font-size: 11px;
 }
+/* Background reviews (1.9.0): the server's note under the bar + Cancel. */
+.ogm-gpdm-progress-detail {
+	display: block;
+	max-width: 46em;
+	margin-top: .4rem;
+	color: #50575e;
+}
+.ogm-gpdm-progress-detail:empty {
+	display: none;
+}
+.ogm-gpdm-ai-cancel {
+	margin-top: .3rem;
+}
 @media (prefers-reduced-motion: reduce) {
 	.ogm-gpdm-progress-fill,
 	.ogm-gpdm-progress-moon {
@@ -402,4 +415,87 @@ a.button.ogm-gpdm-danger-btn:hover {
 @media screen and (max-width: 960px) {
 	.ogm-gpdm-layout { flex-direction: column; }
 	.ogm-gpdm-sidebar { flex-basis: auto; width: 100%; }
+}
+
+/* Contrast check + Claude in Chrome (1.10.0). */
+.ogm-gpdm-audit-totals {
+	margin: .4rem 0;
+}
+.ogm-gpdm-audit-details summary {
+	cursor: pointer;
+	margin-bottom: .5rem;
+}
+.ogm-gpdm-audit-table {
+	max-width: 46em;
+	margin-bottom: .8rem;
+}
+.ogm-gpdm-audit-list {
+	margin: 0 0 1rem;
+}
+.ogm-gpdm-audit-list li {
+	margin-bottom: .35rem;
+	overflow-wrap: anywhere;
+}
+.ogm-gpdm-swatch { /* the measured pair, as text on background */
+	display: inline-block;
+	min-width: 2.2em;
+	padding: 0 .35em;
+	border: 1px solid #c3c4c7;
+	border-radius: 3px;
+	font-weight: 600;
+	text-align: center;
+}
+.ogm-gpdm-steps {
+	margin-left: 1.4em;
+}
+/* The prompt and paste boxes are .code textareas, so they inherit the
+   600px tab-panel height and vertical resize above; start them shorter, and
+   never cap the height — a max-height left the resize handle doing nothing. */
+#ogm-gpdm-chrome-prompt {
+	height: 18em;
+	min-height: 8em;
+}
+#ogm-gpdm-paste {
+	height: 10em;
+	min-height: 6em;
+}
+
+/* AI Assist (Settings tab): a select with its button and status on one line. */
+.ogm-gpdm-inline {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+.ogm-gpdm-inline select {
+	max-width: 100%;
+}
+.ogm-gpdm-ai-assist .form-table {
+	margin-top: .5rem;
+}
+.ogm-gpdm-ai-assist .form-table td p.description + p.description {
+	margin-top: .4em;
+}
+
+/* Manual tab tip (1.11.2). */
+.ogm-gpdm-manual-tip {
+	border-left: 3px solid #5b8c3e;
+	padding-left: .75em;
+}
+
+/* Export / Import (1.12.0). */
+.ogm-gpdm-import-table {
+	max-width: 46em;
+	margin: .5rem 0;
+}
+#ogm-gpdm-import-preview:empty {
+	display: none;
+}
+#ogm-gpdm-import-preview {
+	border-left: 3px solid #5b8c3e;
+	padding: .25rem 0 .25rem .9rem;
+	margin: .75rem 0;
+}
+.ogm-gpdm-import-undo {
+	margin-top: .75rem;
 }

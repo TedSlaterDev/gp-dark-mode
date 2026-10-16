@@ -79,6 +79,32 @@ $intentionally_dropped = array(
 	'html[data-theme="dark"] body.home .rc-headline  =>  font-weight: 600',
 	'html[data-theme="dark"] body.home .rc-headline a  =>  font-size: inherit !important',
 	'html[data-theme="dark"] body.home .rc-headline a  =>  font-weight: 600',
+	// 1.11.0: the dark-mode menu was simplified at the site owner's request —
+	// no accent fill, no white rules above and below the bar and dropdowns, no
+	// fixed alternate hover color. A light menu bar is darkened by the computed
+	// GP-surfaces rules instead (an already-dark or brand bar keeps its color);
+	// text is var(--text); hover/current get a translucent wash that reads on
+	// any bar. The accent look stays one setting away ("Dark nav accent").
+	'html[data-theme="dark"] .main-navigation  =>  background-color: var(--accent)',
+	'html[data-theme="dark"] .main-navigation  =>  border-bottom: solid 1px rgb(255 255 255 / 40%)',
+	'html[data-theme="dark"] .main-navigation  =>  border-top: solid 1px rgb(255 255 255 / 40%)',
+	'html[data-theme="dark"] .main-navigation  =>  color: #fff',
+	'html[data-theme="dark"] .main-navigation ul ul  =>  background-color: var(--accent)',
+	'html[data-theme="dark"] .main-navigation ul ul  =>  border-bottom: solid 1px rgb(255 255 255 / 40%)',
+	'html[data-theme="dark"] .main-navigation ul ul  =>  border-top: solid 1px rgb(255 255 255 / 40%)',
+	'html[data-theme="dark"] .main-navigation ul ul  =>  color: #fff',
+	'html[data-theme="dark"] .main-navigation .menu-toggle  =>  background-color: var(--accent)',
+	'html[data-theme="dark"] .main-navigation .menu-toggle  =>  border-bottom: solid 1px rgb(255 255 255 / 40%)',
+	'html[data-theme="dark"] .main-navigation .menu-toggle  =>  border-top: solid 1px rgb(255 255 255 / 40%)',
+	'html[data-theme="dark"] .main-navigation .menu-toggle  =>  color: #fff',
+	'html[data-theme="dark"] .main-navigation .main-nav ul li:not([class*="current-menu-"]):hover > a  =>  background-color: var(--bg-2)',
+	'html[data-theme="dark"] .main-navigation .main-nav ul li:not([class*="current-menu-"]):focus > a  =>  background-color: var(--bg-2)',
+	'html[data-theme="dark"] .main-navigation .main-nav ul li.sfHover:not([class*="current-menu-"]) > a  =>  background-color: var(--bg-2)',
+	'html[data-theme="dark"] .main-navigation .menu-bar-item:hover > a  =>  color: var(--text)',
+	'html[data-theme="dark"] .main-navigation .menu-bar-item:hover > a  =>  background-color: var(--bg-2)',
+	'html[data-theme="dark"] .main-navigation .menu-bar-item.sfHover > a  =>  color: var(--text)',
+	'html[data-theme="dark"] .main-navigation .menu-bar-item.sfHover > a  =>  background-color: var(--bg-2)',
+	'html[data-theme="dark"] .main-navigation .main-nav ul li[class*="current-menu-"] > a  =>  background-color: var(--bg-2)',
 );
 
 $missing = array();

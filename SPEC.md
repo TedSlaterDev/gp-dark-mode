@@ -119,6 +119,58 @@ Unregistered (programmatic state — see invariant #1):
 8. **Upgrades render pixel-identically** (see migrations).
 9. **Icons and widget chrome never depend on site fonts** (inline SVG).
 
+## 4b. GeneratePress surfaces + menu (1.11.0)
+
+`OGM_GPDM_Palette::gp_surfaces_css()` is appended to the gp-chrome module's
+CSS (`modules_css()`), so it rides Layer 3 and the bundle's module section.
+`GP_SURFACES` maps GP color settings → GP's own selectors (inc/css-output.php)
+→ token: top bar / header / menu bar / content boxes (inside-article,
+comments-area, page-header, one-container .container, paging-navigation,
+inside-page-header) / footer widgets / site-info → `var(--surface)`; dropdowns
+(`.main-navigation ul ul`) → `var(--surface-2)`; plus the search modal's
+`--gp-search-modal-bg/text-color`. A rule is printed only when the setting
+(merged over `generate_get_color_defaults()`; `var(--slug)` resolved through
+the Global Colors, var() fallbacks allowed) is LIGHT (luminance ≥ 0.5) and,
+with the generated palette enabled, not a slug the palette redefines
+(`palette_slugs()`). Gradients/unknown slugs/empty → untouched. Each printed
+rule also sets `color: var(--text)`. Why: plugin defaults on a vanilla GP site
+left header/comments/footer white under light text (found by the contrast
+check: 80 failures + 16 panels → 0 + 0). Caveat seen in E2E: once a site saves
+`generate_settings` without GP's db-version marker GP switches to its LEGACY
+2.x defaults (#222 footer, #3f3f3f dropdowns) — already dark, so left alone.
+Menu (gp-chrome.css): no accent fill or borders by default (20 v1.0.3 pairs
+waived in coverage.php); `.main-navigation`/`.menu-toggle` text `var(--text)`;
+hover/focus/sfHover/current → `var(--text)` on `rgb(255 255 255 / 8%)`;
+`html.gpdm-accent-nav` still paints `var(--dm-accent)`. GP link hovers that
+outrank the framework's `a { color: var(--link) }` (.main-title, .entry-title,
+.entry-meta, .site-info, .footer-widgets `a:hover/:focus`) → `var(--text)`.
+
+## 4c. Export / Import (1.12.0)
+
+`includes/class-ogm-gpdm-transfer.php` (`OGM_GPDM_Transfer`). Export =
+admin-post `ogm_gpdm_export` (manage_options + nonce; `&keys=1` honored only
+on single-site or for super admins) → JSON {plugin, format 1, version,
+exported_at, site, includes_api_keys, settings (merged over defaults, minus
+custom_css and — unless asked — the two key fields), manual_css,
+generated_css, ai_css, ai_instructions}. NOT exported: model lists, AI
+status/proposal/backup, the contrast check, CAPPED_KEY. Import = JS reads the
+file → AJAX `ogm_gpdm_import_preview` → `parse()` (≤2 MB, plugin +
+format check, known settings keys only, key fields dropped unless
+includes_api_keys) → `diff()`/`preview_html()` (settings + modules now →
+after, per-layer char counts, instructions, notes: keys kept/replaced, newer
+exporting version, this site's Global Colors would generate a different
+palette) → stashed in a per-user 15-min transient. `ogm_gpdm_import_apply`
+applies the STASH (never a re-posted file): `snapshot()` → BACKUP_KEY
+`ogm_gpdm_import_backup` (raw settings incl. keys + 3 layers + instructions),
+then `write()`: input = defaults ∪ current ∪ file; modules merged (slugs the
+file lacks keep this site's); key fields absent unless the file has a
+non-empty key (absent → sanitize_settings keeps the stored key); manual_css →
+custom_css (empty allowed); instructions via `ai_instructions`;
+`sanitize_settings()` explicitly, then update_option; layers via sanitize_css;
+`flush_settings_cache()`. JS reloads right after apply (a stale form + Save
+Settings would revert it). `ogm_gpdm_import_undo` restores the snapshot (an
+empty stored key → 'clear'; absent custom_css → '') and deletes the backup.
+
 ## 5. AI review flow
 
 Run (AJAX `ogm_gpdm_ai_start`: cap + nonce + multisite super-admin gate + key
@@ -126,6 +178,63 @@ pre-flight) → stores owner instructions (`ogm_gpdm_ai_instructions`, ≤4000
 chars, prefills next run) → status=running → `wp_schedule_single_event` +
 `spawn_cron` → cron hook `ogm_gpdm_run_ai_review` executes
 `OGM_GPDM_AI::run_review()`:
+
+**Review mode (1.9.0)** — `ai_mode` setting: '' Automatic | direct | background.
+`uses_background()`: Automatic = background when `host_caps_requests()` (WP
+Engine: `is_wpe()` / `WPE_APIKEY` / `WpeCommon`; filter
+`ogm_gpdm_ai_host_caps_requests`) or the learned flag `ogm_gpdm_ai_host_capped`
+(set by `polled_status()` when a direct run died in phase `calling`; cleared by
+a successful run in explicit Direct mode). Why: WPE ends requests at 60 s and
+a High review takes ~4 min — the cron worker started, was killed mid-call, and
+the old stale check blamed cron (greport, 2026-10-14).
+Status carries `mode`, `phase` (queued → bundle → calling | submitted) +
+`phase_at`, provider/model/effort, and for background `job {id, budget}` +
+`checked`. `stale_reason()`: direct `calling` dies at phase_at +
+effort_timeout + 60 → "host ended the request" (+ learn in Automatic);
+queued/bundle at RUN_TIMEOUT; background `submitted` at BACKGROUND_TIMEOUT
+(26 h). Background path: `submit_background()` POSTs an Anthropic batch of one
+(`custom_id` gpdm-review, same params as direct minus `fallbacks` + beta
+header — batches reject them) or an OpenAI Responses `background:true,
+store:true` request; `check_job()` (page poll, throttled CHECK_INTERVAL 8 s;
+cron `ogm_gpdm_check_ai_job` every 60 s, forced) polls → results JSONL /
+response output → `store_proposal()` → `forget_job()` DELETEs the provider
+copy. 408/409/429/5xx/network = retry with a note; other 4xx = error.
+`cancel_job()` (AJAX `ogm_gpdm_ai_cancel`) cancels background jobs only.
+Status/start/cancel AJAX send `X-Accel-Expires: 0` + JS cache-buster `t`
+(WordKeeper caches admin-ajax POSTs by URL+body).
+
+**Contrast check (1.10.0)** — `assets/admin/gp-dark-mode-audit.js` (engine,
+`window.OGM_GPDM_AUDIT.run(pages)`) + `includes/class-ogm-gpdm-audit.php`
+(`OGM_GPDM_Audit`). Pages: `pages()` = home, latest post, a page (not front /
+posts page), top category, `?s=the`, a 404 URL; filter `ogm_gpdm_audit_urls`;
+own host only. Per page: `fetch(credentials:'omit')` (retry same-origin on
+401/403) → DOMParser strips script/noscript/iframe/object/embed/meta
+http-equiv/#wpadminbar, converts `media=print onload` and `preload as=style`
+to plain stylesheets, adds `<base>` + a no-transitions style → `srcdoc` in an
+iframe with `sandbox="allow-same-origin"` (NO allow-scripts: no ads, analytics,
+pixels; parent can still read it). Measure: text nodes' parents + form fields;
+fg composited over the background walked up the ancestors (stops at a
+background-image → `over_image`); canvas white unless color-scheme is dark-only;
+WCAG 4.5 / 3 (≥24px or ≥18.66px bold). Light pass first (`also_light` marks
+elements failing there too), then dark. Light panels: own bg alpha ≥ .5,
+luminance ≥ .45, area ≥ 12,000px², outermost only. Hover/focus: every
+same-origin rule using :hover/:focus(-visible|-within) gets a twin with
+`.gpdm-force-<state>` inserted right after it (same specificity + source
+order); the class goes on the element (+ ancestors for hover). AJAX
+`ogm_gpdm_audit_save` → `save_from_json()` rebuilds every field (own-host URLs,
+#rrggbb, clamped numbers, ≤60 failures / 20 panels per page) → option
+`ogm_gpdm_audit` (no autoload). Bundle section 6 = `to_markdown()`; the user
+prompt adds "MEASURED PROBLEMS" when section 6 is present. The Run AI Review
+click re-measures unless the stored check is < 5 min old. Live-verified on a
+fixture site: e.g. #444 on #0f0f12 = 1.96:1, a hover-only #222 failure, a
+both-modes #777 (also_light), async CSS applied, script-injected text and
+noscript pixel never loaded.
+**Claude in Chrome panel** — `OGM_GPDM_Audit::chrome_prompt()` (site, stack,
+Global Colors, layer contract, pages at 1280 + 390px, method incl. live
+`<style id="gpdm-trial">` testing, the measured problems, current AI + Manual
+CSS, deliverable = one ```css block) + paste box → AJAX `ogm_gpdm_ai_paste` →
+`OGM_GPDM_AI::store_pasted_proposal()` (bare CSS gets fenced) → the normal
+proposal diff/Apply/backup flow (provider "Pasted", model "Claude in Chrome").
 
 1. Assemble the AI Context Bundle (`OGM_GPDM_Bundle`, section 6).
 2. Prompt: system = role + output contract (deliverable replaces Layer 4a;

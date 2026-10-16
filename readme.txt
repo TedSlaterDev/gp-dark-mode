@@ -4,7 +4,7 @@ Tags: dark mode, generatepress, dark theme, toggle, color scheme
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.8.0
+Stable tag: 1.12.0
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -49,6 +49,15 @@ GP Dark Mode adds a polished light/dark experience to GeneratePress:
 = Does it require GeneratePress? =
 The styling and toggle behavior work on any theme, but the automatic menu-bar placement uses a GeneratePress hook. On other themes, use the Dark Mode Toggle block or the `[gp_dark_mode_toggle]` shortcode.
 
+= How do I copy my dark mode from staging to the live site? =
+On staging, open Settings → GP Dark Mode → Settings and click Export settings. On the live site, choose that file under Import from a file: you'll see exactly what would change, then click Apply import. API keys aren't copied unless you tick Include API keys, and Undo import puts the live site back as it was. Don't use your host's "push staging to live" for this — it copies the whole database, posts and pages included.
+
+= Does the contrast check trigger my ads or analytics? =
+No. It fetches each page logged out, removes every script, noscript block and iframe, and renders what's left in a hidden frame that isn't allowed to run scripts — so ad tags, analytics and tracking pixels never load. Stylesheets and images do, so the page is styled exactly as visitors see it. The trade-off: ads and anything a script builds aren't measured; the Claude in Chrome review covers those.
+
+= The AI review says the host ended the request, or it never finishes =
+Some hosts — WP Engine among them — end any request after about a minute, and a review at High effort takes several. Set Review mode (AI tab) to Background, or leave it on Automatic: it already uses Background on WP Engine and switches any other site to Background after a direct review there is cut off. Background reviews with Claude go through Anthropic's batch service at half price; they usually finish within a few minutes but can take up to an hour, and you can leave the page while they run.
+
 = My header is built with blocks and the toggle doesn't appear =
 A Site Header Block Element (for example one holding a GenerateBlocks Navigation block) replaces GeneratePress's header, so there is no menu bar for the automatic toggle to join. Add the Dark Mode Toggle block to the header element where you want the switch. The settings page points this out when it finds a Site Header Block Element.
 
@@ -82,16 +91,53 @@ CSS. No visitor data is ever sent.
 Terms: https://www.anthropic.com/legal/commercial-terms
 Privacy: https://www.anthropic.com/legal/privacy
 
+Background reviews use Anthropic's Message Batches API; the plugin deletes the
+batch once it has collected the result.
+
 = OpenAI API (api.openai.com) =
-The same data is sent when OpenAI is your chosen provider.
+The same data is sent when OpenAI is your chosen provider. Background reviews
+use the Responses API in background mode with storage on, so the result
+survives until the plugin collects it; the plugin then deletes the stored
+response.
 Terms: https://openai.com/policies/terms-of-use
 Privacy: https://openai.com/policies/privacy-policy
 
 Building the AI Context Bundle also fetches pages and stylesheets from
 your own site (loopback requests); that step sends nothing to any third
-party.
+party. The contrast check loads your own pages in your browser, with
+scripts off; it contacts no third party either.
 
 == Changelog ==
+
+= 1.12.0 =
+* New: **Export / Import** (Settings tab) — copy a configured dark mode from one site to another, staging to live, say. Export downloads one JSON file with every setting, the module choices, the generated palette, the AI stylesheet, the Manual CSS and the review instructions. API keys stay out unless you tick "Include API keys" (then they're in the file in plain text — keep it private). Site-specific state stays behind: model lists, the contrast check, pending proposals, and the "host ends long requests" flag.
+* New: importing shows exactly what would change — each setting and module from now to after, each stylesheet's size, and whether this site keeps its own API keys — before anything is written. Apply saves this site's current settings first, so "Undo import" puts everything back, keys included. A file from an older plugin version leaves modules it didn't know about as they are; one from a newer version gets a warning.
+
+= 1.11.2 =
+* Changed: the Manual tab now says where its CSS really sits — after the plugin's other stylesheets, but before your theme's style.css — with a tip: start every selector with html[data-theme="dark"] (each selector in a comma-separated list needs its own), so your rule outranks a theme rule with the same selector and stays out of light mode.
+
+= 1.11.1 =
+* Fixed: instructions you deleted from the AI Review box came back after Save Settings — they were only saved when a review started. Save Settings now saves the box as it is, empty included.
+* Fixed: the Review with Claude in Chrome prompt box showed a resize handle that did nothing. It now starts at a comfortable height and drags taller; the paste box below it starts shorter.
+* Changed: the AI Assist settings are laid out like the rest of the Settings tab — one labeled row each for Provider, API key, Model (with Refresh models beside it), Effort and Review mode, with shorter descriptions.
+* Changed: the "Dark nav accent" description now matches 1.11.0's simpler menu.
+
+= 1.11.0 =
+* Fixed: on a GeneratePress site that hadn't generated a dark palette, dark mode left the header, menu bar, comments box, archive title box and footer bar white — with light text on them. The GeneratePress module now reads your Customize → Colors settings and darkens every GeneratePress area whose color is light (header, top bar, menu bar and dropdowns, content boxes, footer widgets, footer bar, and the search modal). Areas that are already dark or brand-colored keep their color, and anything your generated palette already remaps is left to it. On a default GeneratePress site the contrast check goes from 80 failures and 16 light panels to none.
+* Fixed: hovering the site title, a post title, post meta (category, comments, author) or a footer link switched it back to GeneratePress's light-mode hover color — #222 or a mid gray, nearly invisible on dark. Those links now turn to the light text color on hover and focus.
+* Changed: **simpler dark-mode menu.** No more white rules above and below the menu bar and its dropdowns, and no accent-colored fill by default: a light menu bar turns dark, a menu bar that's already dark or brand-colored keeps its color, and hover and the current item get a soft light highlight that reads on any of them. If you preferred the accent-colored menu, turn on "Dark nav accent" (Settings tab).
+
+= 1.10.0 =
+* New: **Contrast check** (AI tab). It measures your site the way visitors see it: the homepage, latest post, a page, a category archive, search results and the 404 page are each loaded in a hidden frame — logged out, with scripts off, so no ads, analytics or tracking pixels run — and every piece of text is checked against its real background in light and in dark mode (WCAG: 4.5:1, or 3:1 for large text). Large panels still light in dark mode are flagged, and hover and focus colors are worked out from your own CSS. Results show on the AI tab, worst first, with the failing color pair; failures that exist in light mode too are marked as the site's own design. It runs in your browser in a few seconds.
+* New: an AI review now runs the contrast check first (unless one ran in the last five minutes) and sends the measured failures with the bundle, with an instruction to fix every one. The AI Context Bundle download includes them too, as section 6.
+* New: **Review with Claude in Chrome** (AI tab) — the hands-on alternative. Copy a ready-made prompt (your site's pages, how its dark mode works, the measured problems, the current AI and Manual CSS) into Claude with Claude in Chrome; Claude looks at the site in both modes, tries hover states and phone widths, tests its CSS live and replies with a stylesheet. Paste the reply back and load it as a proposal: you get the same diff, Apply, backup and Restore as an AI review.
+
+= 1.9.0 =
+* New: **Review mode — Automatic, Direct or Background.** A direct review keeps one request open while the model works, and some hosts — WP Engine among them — end every request after about a minute, so a High-effort review (several minutes) was cut off and later reported as "timed out or the site's cron never ran it". Background mode hands the review to the provider and collects the result when it's ready, so no request ever waits: Claude reviews go through Anthropic's Message Batches service at half the usual price (usually a few minutes, occasionally up to an hour), OpenAI reviews run in OpenAI's background mode at the usual speed. The page shows what's happening, you can leave and come back, and a background review can be canceled. Once the result is in, the plugin deletes the provider's copy of the request.
+* New: Automatic (the default) uses Background on WP Engine, and on any site where a direct review was cut off by the host; elsewhere it calls the model directly as before. The AI tab says which one it's using and why.
+* Changed: a review that dies now says where it stopped — never picked up by WP-Cron, stopped while gathering the site's CSS, or ended by the host while waiting for the model — instead of one catch-all message.
+* Fixed: the review's progress checks now tell proxy caches not to store them, so hosts that cache identical admin-ajax requests can't freeze the progress bar on its first answer.
+* Changed: the settings sidebar now mentions the Dark Mode Toggle block, and points palette changes to the Generated and Manual tabs instead of the plugin's own stylesheet (which an update overwrites).
 
 = 1.8.0 =
 * New: **the generated palette now colors the plugin's own pieces from your site, too.** The toggle, its hover glow, the current menu item and form fields in dark mode, and dark-mode links used to keep the framework's built-in navy blues on every site. Generating the palette now derives them from your site: the toggle takes your accent (the color your links use, else your button color, else a Global Color named accent, primary or brand), its hover glow is a brighter shade of it (the white icons stay at 3:1 or better), dark-mode links are a light shade of it that reaches 4.5:1 on every dark surface, and the dark alternate surface is your palette's second surface. These print as a separate block in the Generated tab, each with a note saying where it came from. Regenerate the palette to pick them up.
@@ -211,7 +257,7 @@ party.
 
 = 1.3.0 =
 * New: **AI Assist (BYOK)** — the plugin can now run the dark-mode review itself. Configure a provider (Anthropic or OpenAI), model, and your own API key under AI Assist; "Run AI Review" sends the AI Context Bundle to your account and stores the reply as a **proposal**: prose notes plus a complete replacement for the Additional CSS layer, rendered as a color-marked diff against the current copy. Apply (with an automatic backup of what was effective before, including the bundled seed on never-saved installs) or Discard — nothing is ever applied without a click. **Restore is a swap**: the current Additional CSS trades places with the backup, so restoring is itself reversible and a stale backup can never destroy later hand edits.
-* Defaults: the newest model from the provider's refreshed list (before a refresh, Anthropic `claude-opus-5-5` or OpenAI `gpt-6.1-sol`; after one, Anthropic's newest Opus or OpenAI's top-ranked model), with reasoning effort `medium` unless you choose another Effort; Anthropic requests enable server-side refusal fallbacks. The `ogm_gpdm_ai_effort` filter overrides the effort sent. The reply allowance scales with Effort (16,000 / 32,000 / 48,000 / 64,000 tokens, thinking included); a truncated reply is rejected rather than stored, and developers can change the allowance with the `ogm_gpdm_ai_max_tokens` filter (`$tokens, $provider, $model, $effort`; clamped to 4,000–128,000). A run — bundle assembly plus the model call, in one request — typically takes 1–3 minutes and costs a few tens of cents; if your host cuts long requests, reload the settings page after a couple of minutes, the proposal may still have been stored.
+* Defaults: the newest model from the provider's refreshed list (before a refresh, Anthropic `claude-opus-5-5` or OpenAI `gpt-6.1-sol`; after one, Anthropic's newest Opus or OpenAI's top-ranked model), with reasoning effort `medium` unless you choose another Effort; Anthropic requests enable server-side refusal fallbacks. The `ogm_gpdm_ai_effort` filter overrides the effort sent. The reply allowance scales with Effort (16,000 / 32,000 / 48,000 / 64,000 tokens, thinking included); a truncated reply is rejected rather than stored, and developers can change the allowance with the `ogm_gpdm_ai_max_tokens` filter (`$tokens, $provider, $model, $effort`; clamped to 4,000–128,000). A direct run takes a few minutes; a background run usually a few minutes, occasionally up to an hour with Anthropic's batch service. Costs range from a few cents to about a dollar, depending on model and Effort. If your host ends long requests, use Review mode → Background (Automatic already does on WP Engine, and after any direct run the host cut off).
 * Privacy: the review sends the bundle — including the child theme's `functions.php` with best-effort secret redaction — to the provider you configured, and nowhere else; the API key itself is redacted out of the bundle. On multisite, running a review is network-admin-only, like the bundle download. The key is stored in the plugin's settings option and removed on uninstall (on multisite, uninstall cleans every site's rows); type "clear" in the key field to remove it sooner.
 * Proposal and backup live in their own non-autoloaded options (`ogm_gpdm_ai_proposal`, `ogm_gpdm_ai_backup`), cleaned up on uninstall.
 

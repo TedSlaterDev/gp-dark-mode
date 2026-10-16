@@ -6,21 +6,14 @@
    Enabled by default; toggle under Settings → GP Dark Mode → Modules.
    ========================================================================== */
 
-/* Navigation.
-   `var(--accent)` is verbatim from the original child-theme implementation
-   and resolves in the same cascade slot: GP's dynamic CSS defines --accent
-   after the framework's self-referential declaration, so the theme's value
-   wins (brand blue on the reference site); a theme that never defines
-   --accent computes transparent and the nav blends into the page. The
-   "Dark nav accent" setting (html.gpdm-accent-nav) overrides with the
-   plugin's own --dm-accent. */
+/* Navigation (simplified in 1.11.0): no borders and no accent fill by
+   default. A menu bar that's light in Customize → Colors turns dark through
+   the computed GP-surfaces rules appended to this module; one that's already
+   dark or brand-colored keeps its color. The "Dark nav accent" setting
+   (html.gpdm-accent-nav) paints it with the plugin's --dm-accent instead. */
 html[data-theme="dark"] .main-navigation,
-html[data-theme="dark"] .main-navigation ul ul,
 html[data-theme="dark"] .main-navigation .menu-toggle {
-	background-color: var(--accent);
-	border-bottom: solid 1px rgb(255 255 255 / 40%);
-	border-top: solid 1px rgb(255 255 255 / 40%);
-	color: #fff;
+	color: var(--text);
 }
 
 html.gpdm-accent-nav[data-theme="dark"] .main-navigation,
@@ -48,14 +41,33 @@ html[data-theme="dark"] .sidebar .widget {
 	box-shadow: none;
 }
 
+/* Hover, focus and the current item: a soft light wash that reads on any
+   dark menu bar — the page's surface, a brand color, or the accent — where a
+   fixed alternate color would clash with some of them. */
 html[data-theme="dark"] .main-navigation .main-nav ul li:not([class*="current-menu-"]):hover > a,
 html[data-theme="dark"] .main-navigation .main-nav ul li:not([class*="current-menu-"]):focus > a,
 html[data-theme="dark"] .main-navigation .main-nav ul li.sfHover:not([class*="current-menu-"]) > a,
-html[data-theme="dark"] .main-navigation .menu-bar-item:hover > a,
-html[data-theme="dark"] .main-navigation .menu-bar-item.sfHover > a,
 html[data-theme="dark"] .main-navigation .main-nav ul li[class*="current-menu-"] > a {
 	color: var(--text);
-	background-color: var(--bg-2);
+	background-color: rgb(255 255 255 / 8%);
+}
+
+/* Hover and focus on GP's own links (1.11.0). The framework colors every
+   link var(--link) at rest, but GP's hover rules here are more specific and
+   bring back light-mode colors — #222 for the site title, #575760 for post
+   titles, the accent for post meta — near-invisible on dark. Hover goes to
+   the light text color instead, like GP's accent-to-text hover in light mode. */
+html[data-theme="dark"] .main-title a:hover,
+html[data-theme="dark"] .main-title a:focus,
+html[data-theme="dark"] .entry-title a:hover,
+html[data-theme="dark"] .entry-title a:focus,
+html[data-theme="dark"] .entry-meta a:hover,
+html[data-theme="dark"] .entry-meta a:focus,
+html[data-theme="dark"] .site-info a:hover,
+html[data-theme="dark"] .site-info a:focus,
+html[data-theme="dark"] .footer-widgets a:hover,
+html[data-theme="dark"] .footer-widgets a:focus {
+	color: var(--text);
 }
 
 html[data-theme="dark"] body.single .author-box {

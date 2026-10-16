@@ -21,6 +21,9 @@ function ogm_gpdm_uninstall_delete_options() {
 	delete_option( 'ogm_gpdm_ai_status' );
 	delete_option( 'ogm_gpdm_ai_instructions' );
 	delete_option( 'ogm_gpdm_ai_css' );
+	delete_option( 'ogm_gpdm_ai_host_capped' );
+	delete_option( 'ogm_gpdm_audit' );
+	delete_option( 'ogm_gpdm_import_backup' );
 }
 
 if ( is_multisite() ) {

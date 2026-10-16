@@ -3,7 +3,7 @@
  * Plugin Name:       Dark Mode for GeneratePress
  * Plugin URI:        https://gpdarkmode.com/
  * Description:       Robust, no-flash, accessible dark mode for the GeneratePress theme — with a menu-bar toggle, a behavior settings page, and a clean light/dark CSS-variable framework.
- * Version:           1.8.0
+ * Version:           1.12.0
  * Requires PHP:      7.4
  * Requires at least: 6.0
  * Author:            Orchard Grove Media, LLC
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OGM_GPDM_VERSION', '1.8.0' );
+define( 'OGM_GPDM_VERSION', '1.12.0' );
 define( 'OGM_GPDM_FILE', __FILE__ );
 define( 'OGM_GPDM_DIR', plugin_dir_path( __FILE__ ) );
 define( 'OGM_GPDM_URL', plugin_dir_url( __FILE__ ) );
@@ -88,6 +88,10 @@ final class OGM_GP_Dark_Mode {
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_admin_assets' ) );
 		add_action( 'admin_notices', array( $this, 'maybe_generatepress_notice' ) );
 		add_action( 'admin_post_ogm_gpdm_bundle', array( $this, 'handle_bundle_download' ) );
+		add_action( 'admin_post_ogm_gpdm_export', array( $this, 'handle_export' ) );
+		add_action( 'wp_ajax_ogm_gpdm_import_preview', array( $this, 'handle_import_preview' ) );
+		add_action( 'wp_ajax_ogm_gpdm_import_apply', array( $this, 'handle_import_apply' ) );
+		add_action( 'wp_ajax_ogm_gpdm_import_undo', array( $this, 'handle_import_undo' ) );
 		add_action( 'admin_post_ogm_gpdm_generate', array( $this, 'handle_palette_generate' ) );
 		add_action( 'admin_post_ogm_gpdm_ai_apply', array( $this, 'handle_ai_apply' ) );
 		add_action( 'admin_post_ogm_gpdm_ai_discard', array( $this, 'handle_ai_discard' ) );
@@ -96,7 +100,11 @@ final class OGM_GP_Dark_Mode {
 		add_action( 'wp_ajax_ogm_gpdm_refresh_models', array( $this, 'handle_refresh_models' ) );
 		add_action( 'wp_ajax_ogm_gpdm_ai_start', array( $this, 'handle_ai_start' ) );
 		add_action( 'wp_ajax_ogm_gpdm_ai_status', array( $this, 'handle_ai_status' ) );
+		add_action( 'wp_ajax_ogm_gpdm_ai_cancel', array( $this, 'handle_ai_cancel' ) );
+		add_action( 'wp_ajax_ogm_gpdm_audit_save', array( $this, 'handle_audit_save' ) );
+		add_action( 'wp_ajax_ogm_gpdm_ai_paste', array( $this, 'handle_ai_paste' ) );
 		add_action( 'ogm_gpdm_run_ai_review', array( $this, 'run_ai_review_cron' ) );
+		add_action( 'ogm_gpdm_check_ai_job', array( $this, 'run_ai_check_cron' ) );
 		add_filter( 'plugin_action_links_' . OGM_GPDM_BASENAME, array( $this, 'action_links' ) );
 	}
 
@@ -108,6 +116,7 @@ final class OGM_GP_Dark_Mode {
 	public static function deactivate() {
 		if ( function_exists( 'wp_unschedule_hook' ) ) {
 			wp_unschedule_hook( 'ogm_gpdm_run_ai_review' );
+			wp_unschedule_hook( 'ogm_gpdm_check_ai_job' );
 		}
 		delete_option( 'ogm_gpdm_ai_status' );
 	}
@@ -233,6 +242,14 @@ final class OGM_GP_Dark_Mode {
 				// phpcs:ignore WordPress.WP.AlternativeFunctions.file_get_contents_file_get_contents -- bundled plugin asset.
 				$css .= "\n/* ===== GP Dark Mode module: " . $slug . " ===== */\n" . file_get_contents( $file );
 			}
+			if ( 'gp-chrome' === $slug ) {
+				// 1.11.0: GP's own surfaces that are light in its color
+				// settings, darkened — computed per site, so a header or
+				// footer that's already dark or brand-colored is left alone.
+				require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-palette.php';
+				$handled = $this->get( 'enable_generated' ) ? OGM_GPDM_Palette::palette_slugs( $this->generated_css() ) : array();
+				$css    .= OGM_GPDM_Palette::gp_surfaces_css( null, null, $handled );
+			}
 		}
 		return $css;
 	}
@@ -354,6 +371,7 @@ final class OGM_GP_Dark_Mode {
 			'ai_api_key_openai'    => '',      // saved key is never sent to the other one.
 			'ai_model'            => '',       // Empty = the provider's default model.
 			'ai_effort'           => '',       // Empty = medium; low | medium | high | max.
+			'ai_mode'             => '',       // Empty = Automatic; direct | background (1.9.0).
 		);
 	}
 
@@ -370,6 +388,11 @@ final class OGM_GP_Dark_Mode {
 			$this->settings['modules'] = wp_parse_args( $saved_modules, $defaults['modules'] );
 		}
 		return $this->settings;
+	}
+
+	/** Forget the per-request settings cache (after writing the option directly, e.g. an import). */
+	public function flush_settings_cache() {
+		$this->settings = null;
 	}
 
 	/** Single setting value. */
@@ -448,6 +471,18 @@ final class OGM_GP_Dark_Mode {
 		$out['ai_model']    = isset( $in['ai_model'] ) ? sanitize_text_field( (string) $in['ai_model'] ) : '';
 		$effort             = isset( $in['ai_effort'] ) ? sanitize_key( (string) $in['ai_effort'] ) : '';
 		$out['ai_effort']   = in_array( $effort, array( 'low', 'medium', 'high', 'max' ), true ) ? $effort : '';
+		$mode               = isset( $in['ai_mode'] ) ? sanitize_key( (string) $in['ai_mode'] ) : '';
+		$out['ai_mode']     = in_array( $mode, array( 'direct', 'background' ), true ) ? $mode : '';
+
+		// The AI tab's review instructions ride the settings form (1.11.1), so
+		// Save Settings keeps what's in the box — including an emptied one.
+		// They live in their own unregistered, non-autoloaded option, never in
+		// this array; only a submission that carries the field touches them
+		// (this callback also runs on the plugin's own update_option calls).
+		if ( array_key_exists( 'ai_instructions', $in ) ) {
+			$instructions = sanitize_textarea_field( (string) $in['ai_instructions'] );
+			update_option( 'ogm_gpdm_ai_instructions', function_exists( 'mb_substr' ) ? mb_substr( $instructions, 0, 4000 ) : substr( $instructions, 0, 4000 ), false );
+		}
 
 		// Per-provider key fields. Each renders the mask when a key is saved;
 		// submitting the mask unchanged (or an empty field) keeps the stored
@@ -842,12 +877,23 @@ final class OGM_GP_Dark_Mode {
 
 		// Settings-page behavior (model dropdown refresh + provider switch).
 		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-ai.php';
-		$s = $this->settings();
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-audit.php';
+		$s     = $this->settings();
+		$audit = OGM_GPDM_Audit::get();
+
+		// The contrast check's measuring engine (1.10.0) — no dependencies.
+		wp_enqueue_script(
+			'ogm-gpdm-audit',
+			OGM_GPDM_URL . 'assets/admin/gp-dark-mode-audit.js',
+			array(),
+			OGM_GPDM_VERSION,
+			true
+		);
 
 		wp_enqueue_script(
 			'ogm-gpdm-admin',
 			OGM_GPDM_URL . 'assets/admin/gp-dark-mode-admin.js',
-			array( 'jquery' ),
+			array( 'jquery', 'ogm-gpdm-audit' ),
 			OGM_GPDM_VERSION,
 			true
 		);
@@ -857,7 +903,10 @@ final class OGM_GP_Dark_Mode {
 			array(
 				'refresh_nonce' => wp_create_nonce( 'ogm_gpdm_refresh_models' ),
 				'ai_nonce'      => wp_create_nonce( 'ogm_gpdm_ai_start' ),
-				'ai_state'      => OGM_GPDM_AI::polled_status()['state'],
+				'ai_state'      => OGM_GPDM_AI::polled_status( $this )['state'],
+				'import_nonce'  => wp_create_nonce( 'ogm_gpdm_import' ),
+				'audit_pages'   => OGM_GPDM_Audit::pages(),
+				'audit_time'    => null !== $audit ? (int) $audit['time'] : 0,
 				'choices'       => array(
 					'anthropic' => OGM_GPDM_AI::model_choices( 'anthropic', 'anthropic' === $s['ai_provider'] ? $s['ai_model'] : '' ),
 					'openai'    => OGM_GPDM_AI::model_choices( 'openai', 'openai' === $s['ai_provider'] ? $s['ai_model'] : '' ),
@@ -1056,7 +1105,9 @@ final class OGM_GP_Dark_Mode {
 		echo esc_textarea( '' !== trim( $ai_css ) ? $ai_css : __( '— empty — run a review and apply its proposal to fill this layer —', 'gp-dark-mode' ) );
 		echo '</textarea>';
 
+		$this->render_audit_section();
 		$this->render_ai_review_section();
+		$this->render_chrome_section();
 	}
 
 	/** Tab: the owner's Manual CSS (Layer 4b) — loads last, always wins. */
@@ -1065,7 +1116,16 @@ final class OGM_GP_Dark_Mode {
 		// scopes the CodeMirror height/resize/border rules to it.
 		echo '<div class="ogm-gpdm-css-field">';
 		echo '<h2 class="ogm-gpdm-subhead">' . esc_html__( 'Manual CSS', 'gp-dark-mode' ) . '</h2>';
-		echo '<p class="description">' . esc_html__( 'Your hand-written layer — it loads after every other stylesheet, so it always wins. Nothing is ever added here automatically: the AI writes only to its own tab, the generator to its own — this field belongs to you alone. It starts empty; the plugin ships no site-specific CSS. The home for per-placement ad selectors, GenerateBlocks instance classes, and one-off page chrome.', 'gp-dark-mode' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'Your hand-written layer — it loads after the plugin’s other stylesheets, so it always wins over them. Nothing is ever added here automatically: the AI writes only to its own tab, the generator to its own — this field belongs to you alone. It starts empty; the plugin ships no site-specific CSS. The home for per-placement ad selectors, GenerateBlocks instance classes, and one-off page chrome.', 'gp-dark-mode' ) . '</p>';
+		// 1.11.2: the plugin's CSS prints before the theme's style.css, so an
+		// unprefixed selector the theme also uses ties with it — and loses.
+		echo '<p class="description ogm-gpdm-manual-tip"><strong>' . esc_html__( 'Tip:', 'gp-dark-mode' ) . '</strong> ';
+		printf(
+			/* translators: %s: the dark-mode selector prefix. */
+			esc_html__( 'start every selector with %s — in a comma-separated list, each selector needs its own. All of this plugin’s CSS loads before your theme’s style.css, so a selector your theme also uses ties with it and the theme wins; the prefix makes yours more specific, and keeps the rule out of light mode.', 'gp-dark-mode' ),
+			'<code>html[data-theme="dark"]</code>'
+		);
+		echo '</p>';
 
 		echo '<label><input type="checkbox" name="' . esc_attr( self::OPT_KEY ) . '[enable_custom_css]" value="1" ' . checked( 1, (int) $s['enable_custom_css'], false ) . ' /> ';
 		echo esc_html__( 'Enable this stylesheet — include your Manual CSS in the CSS the plugin outputs. Unchecked, it stays saved here but visitors never receive it.', 'gp-dark-mode' ) . '</label>';
@@ -1129,7 +1189,7 @@ final class OGM_GP_Dark_Mode {
 		echo '<p class="description">';
 		printf(
 			/* translators: %s: CSS variable name. */
-			esc_html__( 'Off by default, matching the original behavior: in dark mode the nav follows the theme’s own --accent color when the theme defines one, and otherwise blends into the page. When on, the nav uses %s instead: the site’s accent once the generated palette is enabled, otherwise the built-in blue.', 'gp-dark-mode' ),
+			esc_html__( 'Off by default: in dark mode a light menu bar turns dark, and one that’s already dark or brand-colored keeps its color. When on, the menu bar and its dropdowns use %s instead — your site’s accent once the generated palette is enabled, otherwise the built-in blue.', 'gp-dark-mode' ),
 			'<code>--dm-accent</code>'
 		);
 		echo '</p>';
@@ -1155,19 +1215,41 @@ final class OGM_GP_Dark_Mode {
 		}
 		echo '</div>';
 
-		// BYOK AI assist configuration.
-		echo '<div class="ogm-gpdm-css-field">';
+		// BYOK AI assist configuration — the same two-column form-table as the
+		// behavior settings above: label left, control right, one short
+		// description per row.
+		echo '<div class="ogm-gpdm-css-field ogm-gpdm-ai-assist">';
 		echo '<h2 class="ogm-gpdm-subhead">' . esc_html__( 'AI Assist', 'gp-dark-mode' ) . '</h2>';
 		echo '<p class="description">' . esc_html__( 'Bring your own API key. The AI review sends this site’s Context Bundle (including functions.php, with likely secrets redacted) to the provider configured here, and returns a proposal you approve on the AI tab — nothing is ever applied automatically.', 'gp-dark-mode' ) . '</p>';
+		echo '<table class="form-table" role="presentation">';
 
-		echo '<p><label>' . esc_html__( 'Provider', 'gp-dark-mode' ) . ' ';
+		// Provider.
+		echo '<tr><th scope="row"><label for="ogm-gpdm-ai-provider">' . esc_html__( 'Provider', 'gp-dark-mode' ) . '</label></th><td>';
 		echo '<select id="ogm-gpdm-ai-provider" name="' . esc_attr( self::OPT_KEY ) . '[ai_provider]">';
 		foreach ( OGM_GPDM_AI::providers() as $pkey => $pdata ) {
 			echo '<option value="' . esc_attr( $pkey ) . '"' . selected( $s['ai_provider'], $pkey, false ) . '>' . esc_html( $pdata['label'] ) . '</option>';
 		}
-		echo '</select></label> ';
+		echo '</select></td></tr>';
 
-		echo '<label>' . esc_html__( 'Model', 'gp-dark-mode' ) . ' ';
+		// API key — one row per provider; only the selected provider's row
+		// shows (JS toggles on switch; the inline style covers no-JS). Keys
+		// are stored per provider so one is never sent to the other's API.
+		foreach ( OGM_GPDM_AI::providers() as $pkey => $pdata ) {
+			$key_field = 'ai_api_key_' . $pkey;
+			$key_id    = 'ogm-gpdm-key-' . $pkey;
+			$has_key   = isset( $s[ $key_field ] ) && '' !== $s[ $key_field ];
+			echo '<tr class="ogm-gpdm-key-row" data-provider="' . esc_attr( $pkey ) . '"' . ( $pkey !== $s['ai_provider'] ? ' style="display:none"' : '' ) . '>';
+			echo '<th scope="row"><label for="' . esc_attr( $key_id ) . '">' . esc_html( sprintf( /* translators: %s: provider label. */ __( '%s API key', 'gp-dark-mode' ), $pdata['label'] ) ) . '</label></th><td>';
+			echo '<input type="password" id="' . esc_attr( $key_id ) . '" name="' . esc_attr( self::OPT_KEY ) . '[' . esc_attr( $key_field ) . ']" value="' . esc_attr( $has_key ? self::KEY_MASK : '' ) . '" autocomplete="new-password" class="regular-text" placeholder="' . esc_attr__( 'paste your API key', 'gp-dark-mode' ) . '" />';
+			if ( $has_key ) {
+				echo '<p class="description">' . esc_html__( 'A key is saved. Replace it by typing a new one, or type “clear” to remove it.', 'gp-dark-mode' ) . '</p>';
+			}
+			echo '</td></tr>';
+		}
+
+		// Model.
+		echo '<tr><th scope="row"><label for="ogm-gpdm-ai-model">' . esc_html__( 'Model', 'gp-dark-mode' ) . '</label></th><td>';
+		echo '<div class="ogm-gpdm-inline">';
 		echo '<select id="ogm-gpdm-ai-model" name="' . esc_attr( self::OPT_KEY ) . '[ai_model]">';
 		echo '<option value="">' . esc_html(
 			sprintf(
@@ -1179,9 +1261,22 @@ final class OGM_GP_Dark_Mode {
 		foreach ( OGM_GPDM_AI::model_choices( $s['ai_provider'], $s['ai_model'] ) as $model_id ) {
 			echo '<option value="' . esc_attr( $model_id ) . '"' . selected( $s['ai_model'], $model_id, false ) . '>' . esc_html( $model_id ) . '</option>';
 		}
-		echo '</select></label> ';
+		echo '</select>';
+		// type=button so pressing Enter in a field saves settings instead of refreshing.
+		echo '<button type="button" class="button" id="ogm-gpdm-refresh-models">' . esc_html__( 'Refresh models', 'gp-dark-mode' ) . '</button>';
+		echo '<span id="ogm-gpdm-refresh-status" aria-live="polite"></span>';
+		echo '</div>';
+		$models_updated = OGM_GPDM_AI::models_cache( $s['ai_provider'] )['updated'];
+		if ( $models_updated ) {
+			/* translators: %s: human-readable time difference. */
+			echo '<p class="description">' . esc_html( sprintf( __( 'Model list refreshed %s ago, live from the provider.', 'gp-dark-mode' ), human_time_diff( $models_updated, time() ) ) ) . '</p>';
+		} else {
+			echo '<p class="description">' . esc_html__( 'Showing a default list. Save the API key, then click Refresh models to pull the provider’s current lineup.', 'gp-dark-mode' ) . '</p>';
+		}
+		echo '</td></tr>';
 
-		echo '<label>' . esc_html__( 'Effort', 'gp-dark-mode' ) . ' ';
+		// Effort.
+		echo '<tr><th scope="row"><label for="ogm-gpdm-ai-effort">' . esc_html__( 'Effort', 'gp-dark-mode' ) . '</label></th><td>';
 		echo '<select id="ogm-gpdm-ai-effort" name="' . esc_attr( self::OPT_KEY ) . '[ai_effort]">';
 		$effort_labels = array(
 			''       => __( 'Default (medium)', 'gp-dark-mode' ),
@@ -1193,40 +1288,158 @@ final class OGM_GP_Dark_Mode {
 		foreach ( $effort_labels as $ekey => $elabel ) {
 			echo '<option value="' . esc_attr( $ekey ) . '"' . selected( $s['ai_effort'], $ekey, false ) . '>' . esc_html( $elabel ) . '</option>';
 		}
-		echo '</select></label> ';
+		echo '</select>';
+		echo '<p class="description">' . esc_html__( 'How much reasoning the model spends on a review — higher is more thorough, slower and costs more. Each step also raises the reply allowance (16,000 / 32,000 / 48,000 / 64,000 tokens for Low to Max, the model’s thinking included) and the time limit (4 / 7 / 11 / 14 minutes).', 'gp-dark-mode' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'Models without an effort setting ignore it. OpenAI models below gpt-6 and the o-series top out at High, so Max is sent as High.', 'gp-dark-mode' ) . '</p>';
+		echo '</td></tr>';
 
-		// type=button so pressing Enter in a field saves settings instead of refreshing.
-		echo '<button type="button" class="button" id="ogm-gpdm-refresh-models">' . esc_html__( 'Refresh models', 'gp-dark-mode' ) . '</button> ';
-		echo '<span id="ogm-gpdm-refresh-status" aria-live="polite"></span></p>';
-
-		$models_updated = OGM_GPDM_AI::models_cache( $s['ai_provider'] )['updated'];
-		if ( $models_updated ) {
-			/* translators: %s: human-readable time difference. */
-			echo '<p class="description">' . esc_html( sprintf( __( 'Model list refreshed %s ago, live from the provider.', 'gp-dark-mode' ), human_time_diff( $models_updated, time() ) ) ) . '</p>';
-		} else {
-			echo '<p class="description">' . esc_html__( 'Showing a default list. Save the API key, then click Refresh models to pull the provider’s current lineup.', 'gp-dark-mode' ) . '</p>';
+		// Review mode (1.9.0): direct call vs background job.
+		echo '<tr><th scope="row"><label for="ogm-gpdm-ai-mode">' . esc_html__( 'Review mode', 'gp-dark-mode' ) . '</label></th><td>';
+		echo '<select id="ogm-gpdm-ai-mode" name="' . esc_attr( self::OPT_KEY ) . '[ai_mode]">';
+		$mode_labels = array(
+			''           => __( 'Automatic', 'gp-dark-mode' ),
+			'direct'     => __( 'Direct — wait for the reply', 'gp-dark-mode' ),
+			'background' => __( 'Background — hand it off, collect it later', 'gp-dark-mode' ),
+		);
+		foreach ( $mode_labels as $mkey => $mlabel ) {
+			echo '<option value="' . esc_attr( $mkey ) . '"' . selected( $s['ai_mode'], $mkey, false ) . '>' . esc_html( $mlabel ) . '</option>';
 		}
-		echo '<p class="description">' . esc_html__( 'Effort sets how much reasoning the model spends on the review: higher is more thorough, slower and costs more. Each step also raises the reply allowance — 16,000 / 32,000 / 48,000 / 64,000 tokens for Low / Medium / High / Max, with the model’s thinking counted against it — and the time limit (4 / 7 / 11 / 14 minutes). Models that take no effort setting ignore it; OpenAI models below gpt-6 and the o-series top out at High, so Max is sent as High there.', 'gp-dark-mode' ) . '</p>';
-
-		// One key row per provider — only the selected provider's row shows
-		// (JS toggles on switch; server-side style covers no-JS). Keys are
-		// stored per provider so one is never sent to the other's API.
-		foreach ( OGM_GPDM_AI::providers() as $pkey => $pdata ) {
-			$key_field = 'ai_api_key_' . $pkey;
-			$has_key   = isset( $s[ $key_field ] ) && '' !== $s[ $key_field ];
-			echo '<p class="ogm-gpdm-key-row" data-provider="' . esc_attr( $pkey ) . '"' . ( $pkey !== $s['ai_provider'] ? ' style="display:none"' : '' ) . '>';
-			echo '<label>' . esc_html( sprintf( /* translators: %s: provider label. */ __( '%s API key', 'gp-dark-mode' ), $pdata['label'] ) ) . ' ';
-			echo '<input type="password" name="' . esc_attr( self::OPT_KEY ) . '[' . esc_attr( $key_field ) . ']" value="' . esc_attr( $has_key ? self::KEY_MASK : '' ) . '" autocomplete="new-password" class="regular-text" placeholder="' . esc_attr__( 'paste your API key', 'gp-dark-mode' ) . '" /></label>';
-			if ( $has_key ) {
-				echo ' <span class="description">' . esc_html__( 'A key is saved — replace it by typing a new one, or type “clear” to remove it.', 'gp-dark-mode' ) . '</span>';
+		echo '</select>';
+		if ( '' === OGM_GPDM_AI::mode_setting( $s ) ) {
+			$why = OGM_GPDM_AI::auto_background_reason();
+			if ( 'host' === $why ) {
+				$auto_note = __( 'Automatic is using Background on this site: it runs on a host that ends long requests.', 'gp-dark-mode' );
+			} elseif ( 'learned' === $why ) {
+				$auto_note = __( 'Automatic is using Background on this site: an earlier direct review here was cut off by the host. Choose Direct to try direct reviews again.', 'gp-dark-mode' );
+			} else {
+				$auto_note = __( 'Automatic is using Direct on this site. If the host ends a review partway through, the plugin switches this site to Background.', 'gp-dark-mode' );
 			}
-			echo '</p>';
+			echo '<p class="description ogm-gpdm-mode-note"><strong>' . esc_html( $auto_note ) . '</strong></p>';
 		}
+		echo '<p class="description">' . esc_html__( 'Direct keeps one request open while the model works — fastest, but some hosts (WP Engine among them) end any request after about a minute, and a High-effort review takes several.', 'gp-dark-mode' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'Background hands the review to the provider and collects the result when it’s ready: with Anthropic it goes through the batch service at half price, usually within a few minutes but occasionally up to an hour; with OpenAI it runs at the usual speed. Background reviews can be canceled, and the provider’s copy is deleted once the result is in.', 'gp-dark-mode' ) . '</p>';
+		echo '</td></tr>';
 
+		echo '</table>';
 		echo '</div>';
 
+		$this->render_transfer_card();
 		$this->render_bundle_card();
 		$this->render_danger_zone();
+	}
+
+	/** Export / Import (Settings tab, 1.12.0): copy this dark mode to another site. */
+	private function render_transfer_card() {
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-transfer.php';
+		$export_url = wp_nonce_url( admin_url( 'admin-post.php?action=ogm_gpdm_export' ), 'ogm_gpdm_export' );
+
+		echo '<div class="ogm-gpdm-css-field ogm-gpdm-transfer">';
+		echo '<h2 class="ogm-gpdm-subhead">' . esc_html__( 'Export / Import', 'gp-dark-mode' ) . '</h2>';
+		echo '<p class="description">' . esc_html__( 'Copy this site’s dark mode to another site — staging to live, say. The file holds every setting on these tabs, the module choices, the generated palette, the AI stylesheet, the Manual CSS and the review instructions. It leaves out what belongs to this site alone: API keys (unless you include them), the model lists, the contrast check and any pending proposal.', 'gp-dark-mode' ) . '</p>';
+
+		echo '<p class="ogm-gpdm-inline"><a class="button" id="ogm-gpdm-export" href="' . esc_url( $export_url ) . '">' . esc_html__( 'Export settings (.json)', 'gp-dark-mode' ) . '</a>';
+		if ( ! is_multisite() || is_super_admin() ) {
+			echo '<label><input type="checkbox" id="ogm-gpdm-export-keys" /> ' . esc_html__( 'Include API keys', 'gp-dark-mode' ) . '</label>';
+		}
+		echo '</p>';
+		if ( ! is_multisite() || is_super_admin() ) {
+			echo '<p class="description">' . esc_html__( 'With keys included, the file holds them in plain text — keep it private, and delete it once it’s imported.', 'gp-dark-mode' ) . '</p>';
+		}
+
+		// No name attribute: the file is read in the browser and previewed over
+		// AJAX, so it never rides along with Save Settings.
+		echo '<p><label for="ogm-gpdm-import-file"><strong>' . esc_html__( 'Import from a file', 'gp-dark-mode' ) . '</strong></label><br />';
+		echo '<input type="file" id="ogm-gpdm-import-file" accept=".json,application/json" /> <span id="ogm-gpdm-import-status" aria-live="polite"></span></p>';
+		echo '<div id="ogm-gpdm-import-preview"></div>';
+		echo '<p class="description">' . esc_html__( 'Nothing changes until you’ve seen exactly what the import would change and clicked Apply. This site’s current settings are saved first, so the import can be undone.', 'gp-dark-mode' ) . '</p>';
+
+		$backup = OGM_GPDM_Transfer::backup();
+		if ( null !== $backup ) {
+			echo '<p class="ogm-gpdm-import-undo">' . esc_html(
+				sprintf(
+					/* translators: 1: source site, 2: UTC timestamp. */
+					__( 'Imported from %1$s on %2$s UTC.', 'gp-dark-mode' ),
+					$backup['source'],
+					$backup['created']
+				)
+			) . ' <button type="button" class="button" id="ogm-gpdm-import-undo">' . esc_html__( 'Undo import', 'gp-dark-mode' ) . '</button> <span id="ogm-gpdm-undo-status" aria-live="polite"></span></p>';
+		}
+		echo '</div>';
+	}
+
+	/** Download this site's settings as JSON (Export / Import). */
+	public function handle_export() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_die( esc_html__( 'Insufficient permissions.', 'gp-dark-mode' ) );
+		}
+		check_admin_referer( 'ogm_gpdm_export' );
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-transfer.php';
+
+		// Keys come out in plain text, so only for someone who could set them
+		// network-wide on multisite.
+		$keys = ! empty( $_GET['keys'] ) && ( ! is_multisite() || is_super_admin() ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- nonce checked above.
+		$json = wp_json_encode( OGM_GPDM_Transfer::build_export( $this, $keys ), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE );
+
+		nocache_headers();
+		header( 'Content-Type: application/json; charset=utf-8' );
+		header( 'Content-Disposition: attachment; filename="' . OGM_GPDM_Transfer::export_filename() . '"' );
+		header( 'Content-Length: ' . strlen( $json ) );
+		header( 'X-Content-Type-Options: nosniff' );
+		echo $json; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON file download.
+		exit;
+	}
+
+	/** AJAX: validate an export file and show what importing it would change (writes nothing). */
+	public function handle_import_preview() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Insufficient permissions.', 'gp-dark-mode' ) ), 403 );
+		}
+		check_ajax_referer( 'ogm_gpdm_import', 'nonce' );
+		self::no_proxy_cache();
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-transfer.php';
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-palette.php';
+
+		$raw    = isset( $_POST['file'] ) ? wp_unslash( $_POST['file'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- JSON: parse() keeps known fields only; apply() sanitizes every value.
+		$import = OGM_GPDM_Transfer::parse( $raw );
+		if ( is_wp_error( $import ) ) {
+			wp_send_json_error( array( 'message' => $import->get_error_message() ) );
+		}
+		OGM_GPDM_Transfer::stash( $import );
+		wp_send_json_success( array( 'html' => OGM_GPDM_Transfer::preview_html( $this, $import ) ) );
+	}
+
+	/** AJAX: apply the previewed import (after saving this site's state for undo). */
+	public function handle_import_apply() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Insufficient permissions.', 'gp-dark-mode' ) ), 403 );
+		}
+		check_ajax_referer( 'ogm_gpdm_import', 'nonce' );
+		self::no_proxy_cache();
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-transfer.php';
+
+		$import = OGM_GPDM_Transfer::stashed();
+		if ( null === $import ) {
+			wp_send_json_error( array( 'message' => __( 'The preview has expired — choose the file again.', 'gp-dark-mode' ) ) );
+		}
+		OGM_GPDM_Transfer::apply( $this, $import );
+		delete_transient( OGM_GPDM_Transfer::PENDING_PREFIX . get_current_user_id() );
+		wp_send_json_success( array( 'message' => __( 'Imported.', 'gp-dark-mode' ) ) );
+	}
+
+	/** AJAX: put back the settings from before the last import. */
+	public function handle_import_undo() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Insufficient permissions.', 'gp-dark-mode' ) ), 403 );
+		}
+		check_ajax_referer( 'ogm_gpdm_import', 'nonce' );
+		self::no_proxy_cache();
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-transfer.php';
+
+		$result = OGM_GPDM_Transfer::undo( $this );
+		if ( is_wp_error( $result ) ) {
+			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+		}
+		wp_send_json_success( array( 'message' => __( 'Import undone.', 'gp-dark-mode' ) ) );
 	}
 
 	/** The Danger Zone (Settings tab): factory reset. */
@@ -1252,6 +1465,143 @@ final class OGM_GP_Dark_Mode {
 	}
 
 	/** The AI Review section (inside the settings form, below AI Assist config). */
+	/**
+	 * AI tab: the measured contrast check (1.10.0) — run button, the stored
+	 * result's summary, and the details behind a disclosure.
+	 */
+	private function render_audit_section() {
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-audit.php';
+
+		echo '<h2 class="ogm-gpdm-subhead">' . esc_html__( 'Contrast check', 'gp-dark-mode' ) . '</h2>';
+		echo '<p class="description">' . esc_html__( 'Measures the site as visitors see it: each page below is loaded in a hidden frame — logged out, with scripts off, so no ads or analytics run — and every piece of text is checked against its real background in light and dark mode, with hover and focus states worked out from your CSS. Large panels still light in dark mode are flagged too. It runs in your browser and takes a few seconds per page; an AI review runs it first and is told to fix what it finds.', 'gp-dark-mode' ) . '</p>';
+		echo '<p><button type="button" class="button" id="ogm-gpdm-run-audit">' . esc_html__( 'Run contrast check', 'gp-dark-mode' ) . '</button> ';
+		echo '<span id="ogm-gpdm-audit-status" aria-live="polite"></span></p>';
+		echo '<div id="ogm-gpdm-audit-result">';
+		$audit = OGM_GPDM_Audit::get();
+		if ( null !== $audit ) {
+			echo self::audit_summary_html( $audit ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- built from escaped parts.
+		}
+		echo '</div>';
+	}
+
+	/** The stored check as HTML: totals per page, then the worst failures. */
+	public static function audit_summary_html( array $audit ) {
+		$t    = OGM_GPDM_Audit::totals( $audit );
+		$html = '<p class="ogm-gpdm-audit-totals"><strong>' . esc_html(
+			sprintf(
+				/* translators: 1: dark-mode failures, 2: light panels, 3: pages, 4: UTC time. */
+				__( 'Dark mode: %1$d text contrast failure(s) and %2$d light panel(s) on %3$d page(s)', 'gp-dark-mode' ),
+				$t['dark'],
+				$t['islands'],
+				$t['ok']
+			)
+		) . '</strong> <span class="description">' . esc_html(
+			sprintf(
+				/* translators: 1: light-mode failures, 2: UTC timestamp. */
+				__( '(light mode: %1$d — measured %2$s UTC)', 'gp-dark-mode' ),
+				$t['light'],
+				$audit['created']
+			)
+		) . '</span></p>';
+
+		$html .= '<details class="ogm-gpdm-audit-details"><summary>' . esc_html__( 'Details', 'gp-dark-mode' ) . '</summary>';
+		$html .= '<table class="widefat striped ogm-gpdm-audit-table"><thead><tr><th>' . esc_html__( 'Page', 'gp-dark-mode' ) . '</th><th>' . esc_html__( 'Text checked', 'gp-dark-mode' ) . '</th><th>' . esc_html__( 'Dark failures', 'gp-dark-mode' ) . '</th><th>' . esc_html__( 'Light panels', 'gp-dark-mode' ) . '</th><th>' . esc_html__( 'Light-mode failures', 'gp-dark-mode' ) . '</th></tr></thead><tbody>';
+		foreach ( $audit['pages'] as $p ) {
+			$html .= '<tr><td><a href="' . esc_url( $p['url'] ) . '" target="_blank" rel="noopener">' . esc_html( $p['label'] ) . '</a></td>';
+			if ( empty( $p['ok'] ) ) {
+				$html .= '<td colspan="4">' . esc_html( '' !== $p['error'] ? $p['error'] : __( 'Could not be checked.', 'gp-dark-mode' ) ) . '</td></tr>';
+				continue;
+			}
+			$html .= '<td>' . (int) $p['texts'] . '</td><td>' . (int) $p['dark_total'] . '</td><td>' . (int) $p['island_total'] . '</td><td>' . (int) $p['light_total'] . '</td></tr>';
+		}
+		$html .= '</tbody></table>';
+
+		// The same failure on several pages is one row (the footer, say).
+		$rows = OGM_GPDM_Audit::ranked_failures( $audit );
+		if ( ! empty( $rows ) ) {
+			$html .= '<ul class="ogm-gpdm-audit-list">';
+			foreach ( array_slice( $rows, 0, 25 ) as $f ) {
+				$label = implode( ', ', array_unique( $f['pages'] ) );
+				$html .= '<li><span class="ogm-gpdm-swatch" style="color:' . esc_attr( $f['fg'] ) . ';background:' . esc_attr( $f['bg'] ) . '">Aa</span> '
+					. '<code>' . esc_html( $f['selector'] ) . '</code>'
+					. ( 'normal' !== $f['state'] ? ' <em>' . esc_html( $f['state'] ) . '</em>' : '' )
+					. ' — ' . esc_html( number_format( $f['ratio'], 2 ) ) . ':1 <span class="description">(' . esc_html( $label . ( $f['also_light'] ? ' · ' . __( 'also in light mode', 'gp-dark-mode' ) : '' ) ) . ')</span></li>';
+			}
+			$html .= '</ul>';
+		}
+		$html .= '</details>';
+		return $html;
+	}
+
+	/**
+	 * AI tab: the hands-on alternative (1.10.0) — a prompt to copy into
+	 * Claude with Claude in Chrome, and a box to paste its reply back in as
+	 * a proposal.
+	 */
+	private function render_chrome_section() {
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-audit.php';
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-bundle.php';
+
+		echo '<h2 class="ogm-gpdm-subhead">' . esc_html__( 'Review with Claude in Chrome', 'gp-dark-mode' ) . '</h2>';
+		echo '<p class="description">' . esc_html__( 'The hands-on alternative: Claude, driving your browser with Claude in Chrome, looks at the site in light and dark mode, tries hover states and phone widths, tests its CSS live, and hands you a stylesheet. Slower and manual, but it sees what a measurement can’t — ads, script-built widgets, how the page actually looks.', 'gp-dark-mode' ) . '</p>';
+		echo '<ol class="ogm-gpdm-steps">';
+		echo '<li>' . esc_html__( 'Optional: run the contrast check above first — its findings go into the prompt.', 'gp-dark-mode' ) . '</li>';
+		echo '<li>' . esc_html__( 'Copy the prompt and paste it into Claude, with Claude in Chrome connected and this site open in Chrome.', 'gp-dark-mode' ) . '</li>';
+		echo '<li>' . esc_html__( 'Paste Claude’s whole reply below and load it as a proposal — you’ll see the diff before anything goes live. (For a small fix you’d rather keep by hand, use the Manual tab instead.)', 'gp-dark-mode' ) . '</li>';
+		echo '</ol>';
+		echo '<textarea readonly id="ogm-gpdm-chrome-prompt" class="large-text code" rows="8" spellcheck="false">' . esc_textarea( OGM_GPDM_Audit::chrome_prompt( $this ) ) . '</textarea>';
+		echo '<p><button type="button" class="button" id="ogm-gpdm-copy-prompt">' . esc_html__( 'Copy prompt', 'gp-dark-mode' ) . '</button> <span id="ogm-gpdm-copy-status" aria-live="polite"></span></p>';
+		echo '<p><label for="ogm-gpdm-paste">' . esc_html__( 'Claude’s reply (or just its CSS):', 'gp-dark-mode' ) . '</label></p>';
+		echo '<textarea id="ogm-gpdm-paste" class="large-text code" rows="6" spellcheck="false"></textarea>';
+		echo '<p><button type="button" class="button button-primary" id="ogm-gpdm-load-paste">' . esc_html__( 'Load as proposal', 'gp-dark-mode' ) . '</button> <span id="ogm-gpdm-paste-status" aria-live="polite"></span></p>';
+	}
+
+	/** AJAX: store a contrast check measured in the browser; reply with its summary and a refreshed Chrome prompt. */
+	public function handle_audit_save() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Insufficient permissions.', 'gp-dark-mode' ) ), 403 );
+		}
+		check_ajax_referer( 'ogm_gpdm_ai_start', 'nonce' );
+		self::no_proxy_cache();
+
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-ai.php';
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-audit.php';
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-bundle.php';
+
+		$raw = isset( $_POST['audit'] ) ? wp_unslash( $_POST['audit'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- JSON, validated field by field in save_from_json().
+		if ( strlen( $raw ) > 400000 ) {
+			wp_send_json_error( array( 'message' => __( 'The contrast check result was too large to store.', 'gp-dark-mode' ) ) );
+		}
+		$audit = OGM_GPDM_Audit::save_from_json( $raw );
+		if ( is_wp_error( $audit ) ) {
+			wp_send_json_error( array( 'message' => $audit->get_error_message() ) );
+		}
+		wp_send_json_success(
+			array(
+				'html'   => self::audit_summary_html( $audit ),
+				'time'   => (int) $audit['time'],
+				'prompt' => OGM_GPDM_Audit::chrome_prompt( $this ),
+			)
+		);
+	}
+
+	/** AJAX: store a pasted reply (Claude in Chrome) as the pending proposal. */
+	public function handle_ai_paste() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Insufficient permissions.', 'gp-dark-mode' ) ), 403 );
+		}
+		check_ajax_referer( 'ogm_gpdm_ai_start', 'nonce' );
+		self::no_proxy_cache();
+
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-ai.php';
+		$text   = isset( $_POST['reply'] ) ? wp_unslash( $_POST['reply'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- CSS: extracted, then run through sanitize_css() before it's stored.
+		$result = OGM_GPDM_AI::store_pasted_proposal( mb_substr( (string) $text, 0, 300000 ) );
+		if ( is_wp_error( $result ) ) {
+			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+		}
+		wp_send_json_success( array( 'message' => __( 'Loaded as a proposal.', 'gp-dark-mode' ) ) );
+	}
+
 	private function render_ai_review_section() {
 		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-ai.php';
 
@@ -1260,14 +1610,14 @@ final class OGM_GP_Dark_Mode {
 		$status   = OGM_GPDM_AI::polled_status();
 
 		echo '<h2 class="ogm-gpdm-subhead">' . esc_html__( 'AI Review', 'gp-dark-mode' ) . '</h2>';
-		echo '<p class="description">' . esc_html__( 'Sends the AI Context Bundle to the provider configured under Settings and proposes a replacement for the AI stylesheet above. The review runs in the background (via WP-Cron) and typically takes 1–3 minutes — this page follows along and shows the proposal when it’s ready. Costs are billed to your own API account (roughly a few tens of cents per run).', 'gp-dark-mode' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'Sends the AI Context Bundle to the provider configured under Settings and proposes a replacement for the AI stylesheet above. The review runs behind the scenes (via WP-Cron) and this page follows along, showing the proposal when it’s ready: a direct review takes a few minutes, a background one usually a few minutes but occasionally up to an hour (see Review mode under Settings). Costs are billed to your own API account — from a few cents to about a dollar per run, depending on model and Effort.', 'gp-dark-mode' ) . '</p>';
 
 		// The owner's instructions: specific fixes for this run, carried into
 		// the prompt with top priority. Prefilled with the last run's text so
 		// reviews can be iterated ("good, but also fix X and Y…").
 		$instructions = get_option( OGM_GPDM_AI::INSTRUCTIONS_KEY, '' );
 		echo '<p><label for="ogm-gpdm-ai-instructions">' . esc_html__( 'Instructions for this review (optional — the reviewer prioritizes these):', 'gp-dark-mode' ) . '</label></p>';
-		echo '<textarea id="ogm-gpdm-ai-instructions" class="large-text" rows="5" spellcheck="false" placeholder="' . esc_attr__( 'e.g. The homepage pagination needs work; the footer menu links should be white; the background behind the featured posts should be dark…', 'gp-dark-mode' ) . '">' . esc_textarea( is_string( $instructions ) ? $instructions : '' ) . '</textarea>';
+		echo '<textarea id="ogm-gpdm-ai-instructions" name="' . esc_attr( self::OPT_KEY ) . '[ai_instructions]" class="large-text" rows="5" spellcheck="false" placeholder="' . esc_attr__( 'e.g. The homepage pagination needs work; the footer menu links should be white; the background behind the featured posts should be dark…', 'gp-dark-mode' ) . '">' . esc_textarea( is_string( $instructions ) ? $instructions : '' ) . '</textarea>';
 
 		echo '<p><button type="button" class="button button-primary" id="ogm-gpdm-run-review"' . ( OGM_GPDM_AI::is_running() ? ' disabled' : '' ) . '>' . esc_html__( 'Run AI Review', 'gp-dark-mode' ) . '</button> ';
 		echo '<span id="ogm-gpdm-review-status" aria-live="polite">';
@@ -1411,8 +1761,12 @@ final class OGM_GP_Dark_Mode {
 
 		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-ai.php';
 
+		self::no_proxy_cache();
+		// Settle a run that died (a host cut it off) first, so Automatic mode
+		// learns from it before this run picks a mode.
+		OGM_GPDM_AI::polled_status( $this );
 		if ( OGM_GPDM_AI::is_running() ) {
-			wp_send_json_error( array( 'message' => __( 'A review is already running — give it a couple of minutes.', 'gp-dark-mode' ) ) );
+			wp_send_json_error( array( 'message' => __( 'A review is already running — wait for it to finish, or cancel it if it’s running in the background.', 'gp-dark-mode' ) ) );
 		}
 
 		// Pre-flight: fail instantly on a missing key instead of taking a
@@ -1444,7 +1798,59 @@ final class OGM_GP_Dark_Mode {
 		check_ajax_referer( 'ogm_gpdm_ai_start', 'nonce' );
 
 		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-ai.php';
-		wp_send_json_success( OGM_GPDM_AI::polled_status() );
+		self::no_proxy_cache();
+		$status = OGM_GPDM_AI::polled_status( $this );
+		// Only what the page shows — never the provider job id.
+		wp_send_json_success(
+			array(
+				'state'   => $status['state'],
+				'message' => isset( $status['message'] ) ? $status['message'] : '',
+				'mode'    => isset( $status['mode'] ) ? $status['mode'] : 'direct',
+				'phase'   => isset( $status['phase'] ) ? $status['phase'] : '',
+				'started' => isset( $status['started'] ) ? (int) $status['started'] : 0,
+			)
+		);
+	}
+
+	/** AJAX: cancel a background review. */
+	public function handle_ai_cancel() {
+		if ( ! current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'message' => __( 'Insufficient permissions.', 'gp-dark-mode' ) ), 403 );
+		}
+		check_ajax_referer( 'ogm_gpdm_ai_start', 'nonce' );
+
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-ai.php';
+		self::no_proxy_cache();
+		$result = OGM_GPDM_AI::cancel_job( $this );
+		if ( is_wp_error( $result ) ) {
+			wp_send_json_error( array( 'message' => $result->get_error_message() ) );
+		}
+		wp_send_json_success( array( 'message' => __( 'Review canceled.', 'gp-dark-mode' ) ) );
+	}
+
+	/**
+	 * The review's AJAX replies change from one poll to the next under an
+	 * identical request body. Some hosts' nginx caches admin-ajax POSTs keyed
+	 * on URL + body and ignores no-store (WordKeeper: 15 minutes), which
+	 * would freeze the progress on its first answer.
+	 */
+	private static function no_proxy_cache() {
+		if ( function_exists( 'nocache_headers' ) ) {
+			nocache_headers();
+		}
+		if ( ! headers_sent() ) {
+			header( 'X-Accel-Expires: 0' );
+		}
+	}
+
+	/** Cron callback: check a background review while nobody has the page open. */
+	public function run_ai_check_cron() {
+		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-ai.php';
+		OGM_GPDM_AI::check_job( $this, true );
+		$status = OGM_GPDM_AI::status();
+		if ( null !== $status && 'running' === $status['state'] && isset( $status['mode'] ) && 'background' === $status['mode'] ) {
+			OGM_GPDM_AI::schedule_check( 60 );
+		}
 	}
 
 	/** Cron callback: execute the review and record the outcome. */
@@ -1464,8 +1870,15 @@ final class OGM_GP_Dark_Mode {
 
 		if ( is_wp_error( $result ) ) {
 			OGM_GPDM_AI::set_status( 'error', $result->get_error_message() );
+		} elseif ( 'submitted' === $result ) {
+			// A background job: the page's poll and this cron check collect it.
+			OGM_GPDM_AI::schedule_check( 30 );
 		} else {
 			OGM_GPDM_AI::set_status( 'done', __( 'Review complete — a proposal is ready.', 'gp-dark-mode' ) );
+			// A direct review that finished proves the host allows it.
+			if ( 'direct' === OGM_GPDM_AI::mode_setting( $this->settings() ) ) {
+				delete_option( OGM_GPDM_AI::CAPPED_KEY );
+			}
 		}
 	}
 
@@ -1576,12 +1989,16 @@ final class OGM_GP_Dark_Mode {
 			'ogm_gpdm_ai_instructions',
 			'ogm_gpdm_ai_models',
 			'ogm_gpdm_ai_css',
+			'ogm_gpdm_ai_host_capped',
+			'ogm_gpdm_audit',
+			'ogm_gpdm_import_backup',
 		);
 		foreach ( $options as $option ) {
 			delete_option( $option );
 		}
 		if ( function_exists( 'wp_unschedule_hook' ) ) {
 			wp_unschedule_hook( 'ogm_gpdm_run_ai_review' );
+			wp_unschedule_hook( 'ogm_gpdm_check_ai_job' );
 		}
 		self::activate();
 	}
@@ -1654,15 +2071,12 @@ final class OGM_GP_Dark_Mode {
 		echo '<div class="ogm-gpdm-card ogm-gpdm-aside-card">';
 		echo '<h2>' . esc_html__( 'Placement & colors', 'gp-dark-mode' ) . '</h2>';
 		echo '<p class="ogm-gpdm-aside-foot">';
-		echo esc_html__( 'The toggle sits in the GeneratePress menu bar (enable it under Customize → Layout → Primary Navigation). Anywhere else, drop in:', 'gp-dark-mode' );
+		echo esc_html__( 'The toggle sits in the GeneratePress menu bar (enable it under Customize → Layout → Primary Navigation). Anywhere else — including a header built with blocks — add the Dark Mode Toggle block, or drop in:', 'gp-dark-mode' );
 		echo '</p>';
 		echo '<p><code>[gp_dark_mode_toggle]</code></p>';
 		echo '<p class="ogm-gpdm-aside-foot">';
-		printf(
-			/* translators: %s: stylesheet filename. */
-			esc_html__( 'Adjust the palette by editing the CSS variables at the top of %s.', 'gp-dark-mode' ),
-			'<code>assets/css/gp-dark-mode.css</code>'
-		);
+		// Never point at the plugin's own files: an update overwrites them.
+		echo esc_html__( 'To change the dark colors, generate the palette from your Global Colors (Generated tab), or override the palette variables in the Manual tab.', 'gp-dark-mode' );
 		echo '</p>';
 		echo '</div>';
 	}

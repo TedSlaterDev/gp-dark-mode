@@ -82,8 +82,10 @@ function wp_get_theme() {
 function generate_get_option( $k ) { return null; }
 function generate_get_global_colors() {
 	$s = get_option( 'generate_settings' );
-	return $s['global_colors'];
+	return ( is_array( $s ) && isset( $s['global_colors'] ) ) ? $s['global_colors'] : array();
 }
+if ( ! function_exists( 'esc_html' ) ) { function esc_html( $s ) { return htmlspecialchars( (string) $s, ENT_QUOTES ); } }
+if ( ! function_exists( 'esc_html__' ) ) { function esc_html__( $s, $d = null ) { return esc_html( $s ); } }
 function get_stylesheet_directory() { global $FIXTURES; return $FIXTURES; }
 function wp_get_custom_css() { return ".customizer-added { background: #eee; }\n/* pasted from AI: ``` */\n.customizer-layout { width: 50%; }"; }
 function get_posts( $args ) { $GLOBALS['get_posts_args'][] = $args; return array( (object) array( 'ID' => 42 ) ); }
@@ -105,9 +107,24 @@ function wp_remote_post( $url, $args = array() ) {
 	$GLOBALS['ai_requests'][] = array( 'url' => $url, 'args' => $args );
 	return $GLOBALS['ai_response'];
 }
+function wp_remote_request( $url, $args = array() ) {
+	$GLOBALS['ai_requests'][] = array( 'url' => $url, 'args' => $args, 'method' => isset( $args['method'] ) ? $args['method'] : 'GET' );
+	return array( 'code' => 200, 'body' => '{}' );
+}
+function wp_next_scheduled( $hook ) { return isset( $GLOBALS['scheduled'][ $hook ] ) ? $GLOBALS['scheduled'][ $hook ] : false; }
 function wp_remote_retrieve_response_code( $r ) { return $r['code']; }
 function wp_remote_retrieve_body( $r ) { return $r['body']; }
 function wp_parse_url( $u, $c = -1 ) { return parse_url( $u, $c ); }
+function esc_url_raw( $u ) { return filter_var( (string) $u, FILTER_SANITIZE_URL ); }
+function set_transient( $k, $v, $e = 0 ) { $GLOBALS['transients'][ $k ] = $v; return true; }
+function get_transient( $k ) { return isset( $GLOBALS['transients'][ $k ] ) ? $GLOBALS['transients'][ $k ] : false; }
+function delete_transient( $k ) { unset( $GLOBALS['transients'][ $k ] ); return true; }
+function get_current_user_id() { return 7; }
+function _n( $single, $plural, $n, $domain = null ) { return 1 === (int) $n ? $single : $plural; }
+if ( ! function_exists( 'number_format_i18n' ) ) { function number_format_i18n( $n, $d = 0 ) { return number_format( $n, $d ); } }
+function add_query_arg( $k, $v, $u ) { return $u . ( false === strpos( $u, '?' ) ? '?' : '&' ) . rawurlencode( $k ) . '=' . rawurlencode( $v ); }
+function get_categories( $a = array() ) { return array( (object) array( 'term_id' => 7, 'name' => 'News' ) ); }
+function get_category_link( $c ) { return 'https://example.test/category/news/'; }
 function sanitize_file_name( $s ) { return preg_replace( '~[^A-Za-z0-9._-]~', '-', $s ); }
 
 $HOME_HTML = <<<HTML
@@ -125,6 +142,15 @@ HTML;
 
 function wp_remote_get( $url, $args = array() ) {
 	global $HOME_HTML;
+	// v1.9.0 background jobs: tests route provider status/result GETs here.
+	if ( isset( $GLOBALS['ai_get'] ) ) {
+		foreach ( $GLOBALS['ai_get'] as $needle => $response ) {
+			if ( false !== strpos( $url, $needle ) ) {
+				$GLOBALS['ai_requests'][] = array( 'url' => $url, 'args' => $args, 'method' => 'GET' );
+				return $response;
+			}
+		}
+	}
 	if ( false !== strpos( $url, 'api.anthropic.com/v1/models' ) ) {
 		return array( 'code' => 200, 'body' => json_encode( array( 'data' => array(
 			array( 'id' => 'claude-haiku-4-5' ),
@@ -671,7 +697,7 @@ check( 'v1.4: cron failure sets error + message', 'error' === $st['state'] && fa
 // Stale running flips to error on poll (cron never ran).
 update_option( OGM_GPDM_AI::STATUS_KEY, array( 'state' => 'running', 'message' => '', 'started' => time() - 1000, 'finished' => 0 ), false );
 $st = OGM_GPDM_AI::polled_status();
-check( 'v1.4: stale running becomes error', 'error' === $st['state'] && false !== strpos( $st['message'], 'cron' ) );
+check( 'v1.4: stale running becomes error', 'error' === $st['state'] && false !== stripos( $st['message'], 'cron' ) );
 check( 'v1.4: stale running unblocks new runs', ! OGM_GPDM_AI::is_running() );
 delete_option( OGM_GPDM_AI::STATUS_KEY );
 delete_option( OGM_GPDM_AI::PROPOSAL_KEY );
@@ -762,6 +788,468 @@ reset_settings_cache( $plugin );
 $md4 = OGM_GPDM_Bundle::to_markdown( OGM_GPDM_Bundle::assemble( $plugin ) );
 check( 'v1.5 bundle: warns when the AI layer is disabled', false !== strpos( $md4, 'AI stylesheet output toggle is currently OFF' ) );
 delete_option( OGM_GPDM_AI::AI_CSS_KEY );
+
+
+// ---- v1.9.0: background reviews (Anthropic batches, OpenAI background responses) ----
+$json_ok = function ( $data ) { return array( 'code' => 200, 'body' => json_encode( $data ) ); };
+$find_req = function ( $needle, $method = null ) {
+	foreach ( $GLOBALS['ai_requests'] as $r ) {
+		$m = isset( $r['method'] ) ? $r['method'] : 'POST';
+		if ( false !== strpos( $r['url'], $needle ) && ( null === $method || $method === $m ) ) {
+			return $r;
+		}
+	}
+	return null;
+};
+$css_reply = "- darkened the cards\n\n```css\nhtml[data-theme=\"dark\"] .bg-test { color: #eee; }\n```";
+$start_bg  = function ( $settings ) use ( $plugin ) {
+	$GLOBALS['wp_options']['ogm_gpdm_settings'] = $settings;
+	reset_settings_cache( $plugin );
+	delete_option( OGM_GPDM_AI::PROPOSAL_KEY );
+	OGM_GPDM_AI::set_status( 'running' );
+	$GLOBALS['ai_requests'] = array();
+	$GLOBALS['ai_get']      = array();
+};
+$force_check = function () {
+	OGM_GPDM_AI::patch_status( array( 'checked' => time() - 60 ) );
+};
+
+// Mode selection.
+delete_option( OGM_GPDM_AI::CAPPED_KEY );
+check( 'mode: Automatic calls directly on an ordinary host', false === OGM_GPDM_AI::uses_background( array( 'ai_mode' => '' ) ) && '' === OGM_GPDM_AI::auto_background_reason() );
+check( 'mode: Background / Direct settings win', true === OGM_GPDM_AI::uses_background( array( 'ai_mode' => 'background' ) ) && false === OGM_GPDM_AI::uses_background( array( 'ai_mode' => 'direct' ) ) );
+update_option( OGM_GPDM_AI::CAPPED_KEY, time() );
+check( 'mode: Automatic switches to background once a host cut a review off', true === OGM_GPDM_AI::uses_background( array( 'ai_mode' => '' ) ) && 'learned' === OGM_GPDM_AI::auto_background_reason() );
+check( 'mode: Direct still means direct on such a site', false === OGM_GPDM_AI::uses_background( array( 'ai_mode' => 'direct' ) ) );
+delete_option( OGM_GPDM_AI::CAPPED_KEY );
+check( 'mode: bogus setting reads as Automatic', '' === OGM_GPDM_AI::mode_setting( array( 'ai_mode' => 'turbo' ) ) );
+
+// Anthropic: submit a one-request batch.
+$start_bg( array( 'ai_provider' => 'anthropic', 'ai_api_key_anthropic' => 'sk-bg', 'ai_model' => 'claude-opus-5-5', 'ai_effort' => 'high', 'ai_mode' => 'background' ) );
+$GLOBALS['ai_response'] = $json_ok( array( 'id' => 'msgbatch_123', 'processing_status' => 'in_progress' ) );
+$result = OGM_GPDM_AI::run_review( $plugin );
+$sub    = $GLOBALS['ai_requests'][0];
+$sb     = json_decode( $sub['args']['body'], true );
+$st     = OGM_GPDM_AI::status();
+check( 'bg anthropic: run_review returns submitted', 'submitted' === $result );
+check( 'bg anthropic: posts one request to the Batches API', false !== strpos( $sub['url'], '/v1/messages/batches' ) && 1 === count( $sb['requests'] ) && 'gpdm-review' === $sb['requests'][0]['custom_id'] );
+check( 'bg anthropic: params carry model, effort and the High allowance', 'claude-opus-5-5' === $sb['requests'][0]['params']['model'] && 'high' === $sb['requests'][0]['params']['output_config']['effort'] && 48000 === $sb['requests'][0]['params']['max_tokens'] );
+check( 'bg anthropic: no fallbacks param or beta header (batches reject them)', ! isset( $sb['requests'][0]['params']['fallbacks'] ) && ! isset( $sub['args']['headers']['anthropic-beta'] ) );
+check( 'bg anthropic: status records the job', 'running' === $st['state'] && 'background' === $st['mode'] && 'submitted' === $st['phase'] && 'msgbatch_123' === $st['job']['id'] && 48000 === $st['job']['budget'] );
+check( 'bg anthropic: page note says batch + can leave', false !== strpos( $st['message'], 'batch' ) && false !== strpos( $st['message'], 'leave this page' ) );
+check( 'bg anthropic: no proposal yet, no direct call made', null === OGM_GPDM_AI::proposal() && null === $find_req( 'api.anthropic.com/v1/messages', 'POST' ) || false !== strpos( $find_req( 'api.anthropic.com/v1/messages', 'POST' )['url'], 'batches' ) );
+
+// Still processing.
+$force_check();
+$GLOBALS['ai_get'] = array( 'batches/msgbatch_123' => $json_ok( array( 'id' => 'msgbatch_123', 'processing_status' => 'in_progress' ) ) );
+$polled = OGM_GPDM_AI::polled_status( $plugin );
+check( 'bg anthropic: in_progress stays running', 'running' === $polled['state'] && null !== $find_req( 'batches/msgbatch_123', 'GET' ) );
+check( 'bg: an old background job is not stale (2 h in)', ( function () { OGM_GPDM_AI::patch_status( array( 'started' => time() - 7200 ) ); return OGM_GPDM_AI::is_running(); } )() );
+
+// Throttle: a check moments ago means no provider call.
+OGM_GPDM_AI::patch_status( array( 'checked' => time() ) );
+$GLOBALS['ai_requests'] = array();
+OGM_GPDM_AI::polled_status( $plugin );
+check( 'bg: checks are throttled', null === $find_req( 'batches/msgbatch_123', 'GET' ) );
+
+// A transient failure keeps it running with a note.
+$force_check();
+$GLOBALS['ai_get'] = array( 'batches/msgbatch_123' => array( 'code' => 529, 'body' => '{"error":{"message":"overloaded"}}' ) );
+$polled = OGM_GPDM_AI::polled_status( $plugin );
+check( 'bg: a 5xx check retries instead of failing', 'running' === $polled['state'] && false !== strpos( $polled['message'], 'retries' ) );
+
+// Ended + succeeded: proposal stored, run done, batch deleted.
+$force_check();
+$GLOBALS['ai_requests'] = array();
+$GLOBALS['ai_get'] = array(
+	'results/msgbatch_123' => array( 'code' => 200, 'body' => json_encode( array( 'custom_id' => 'gpdm-review', 'result' => array( 'type' => 'succeeded', 'message' => array( 'stop_reason' => 'end_turn', 'content' => array( array( 'type' => 'thinking', 'thinking' => 'x' ), array( 'type' => 'text', 'text' => $css_reply ) ) ) ) ) ) . "\n" ),
+	'batches/msgbatch_123' => $json_ok( array( 'id' => 'msgbatch_123', 'processing_status' => 'ended', 'results_url' => 'https://api.anthropic.com/v1/messages/batches/results/msgbatch_123' ) ),
+);
+$polled = OGM_GPDM_AI::polled_status( $plugin );
+$prop   = OGM_GPDM_AI::proposal();
+check( 'bg anthropic: ended batch → proposal stored + done', 'done' === $polled['state'] && null !== $prop && false !== strpos( $prop['css'], '.bg-test' ) && 'claude-opus-5-5' === $prop['model'] );
+check( 'bg anthropic: results fetched with the API key', null !== ( $rr = $find_req( 'results/msgbatch_123', 'GET' ) ) && 'sk-bg' === $rr['args']['headers']['x-api-key'] );
+check( 'bg anthropic: batch deleted at Anthropic afterwards', null !== $find_req( 'batches/msgbatch_123', 'DELETE' ) );
+
+// Ended with a truncated reply → the allowance error, nothing stored.
+$jsonl = function ( $result ) { return array( 'code' => 200, 'body' => json_encode( array( 'custom_id' => 'gpdm-review', 'result' => $result ) ) . "\n" ); };
+$ended = $json_ok( array( 'id' => 'msgbatch_9', 'processing_status' => 'ended', 'results_url' => 'https://api.anthropic.com/v1/messages/batches/results/msgbatch_9' ) );
+$run_ended = function ( $result ) use ( $start_bg, $json_ok, $jsonl, $ended, $plugin ) {
+	$start_bg( array( 'ai_provider' => 'anthropic', 'ai_api_key_anthropic' => 'sk-bg', 'ai_mode' => 'background' ) );
+	OGM_GPDM_AI::patch_status( array( 'mode' => 'background', 'phase' => 'submitted', 'provider' => 'anthropic', 'model' => 'claude-opus-5-5', 'effort' => 'medium', 'checked' => time() - 60, 'job' => array( 'id' => 'msgbatch_9', 'budget' => 32000 ) ) );
+	$GLOBALS['ai_get'] = array( 'results/msgbatch_9' => $jsonl( $result ), 'batches/msgbatch_9' => $ended );
+	return OGM_GPDM_AI::polled_status( $plugin );
+};
+$polled = $run_ended( array( 'type' => 'succeeded', 'message' => array( 'stop_reason' => 'max_tokens', 'content' => array( array( 'type' => 'text', 'text' => '```css' . "\n.partial {" ) ) ) ) );
+check( 'bg anthropic: truncated batch reply rejected with the allowance', 'error' === $polled['state'] && false !== strpos( $polled['message'], '32,000 tokens' ) && null === OGM_GPDM_AI::proposal() );
+$polled = $run_ended( array( 'type' => 'errored', 'error' => array( 'type' => 'error', 'error' => array( 'type' => 'invalid_request_error', 'message' => 'bad model' ) ) ) );
+check( 'bg anthropic: errored request surfaces its message', 'error' === $polled['state'] && false !== strpos( $polled['message'], 'bad model' ) );
+$polled = $run_ended( array( 'type' => 'expired' ) );
+check( 'bg anthropic: expired batch explained', 'error' === $polled['state'] && false !== strpos( $polled['message'], '24 hours' ) );
+$polled = $run_ended( array( 'type' => 'succeeded', 'message' => array( 'stop_reason' => 'refusal', 'stop_details' => array( 'explanation' => 'nope' ), 'content' => array() ) ) );
+check( 'bg anthropic: refusal in a batch result surfaces', 'error' === $polled['state'] && false !== strpos( $polled['message'], 'declined' ) );
+
+// A 404 (job gone) or 401 (key revoked) fails instead of retrying forever.
+$start_bg( array( 'ai_provider' => 'anthropic', 'ai_api_key_anthropic' => 'sk-bg', 'ai_mode' => 'background' ) );
+OGM_GPDM_AI::patch_status( array( 'mode' => 'background', 'phase' => 'submitted', 'provider' => 'anthropic', 'checked' => time() - 60, 'job' => array( 'id' => 'msgbatch_gone', 'budget' => 32000 ) ) );
+$GLOBALS['ai_get'] = array( 'batches/msgbatch_gone' => array( 'code' => 404, 'body' => '{"error":{"message":"not found"}}' ) );
+$polled = OGM_GPDM_AI::polled_status( $plugin );
+check( 'bg: a 404 check fails the run', 'error' === $polled['state'] && false !== strpos( $polled['message'], 'not found' ) );
+
+// The key removed mid-run.
+$start_bg( array( 'ai_provider' => 'anthropic', 'ai_api_key_anthropic' => '', 'ai_mode' => 'background' ) );
+OGM_GPDM_AI::patch_status( array( 'mode' => 'background', 'phase' => 'submitted', 'provider' => 'anthropic', 'checked' => time() - 60, 'job' => array( 'id' => 'msgbatch_k', 'budget' => 32000 ) ) );
+$polled = OGM_GPDM_AI::polled_status( $plugin );
+check( 'bg: a removed key ends the run with an explanation', 'error' === $polled['state'] && false !== strpos( $polled['message'], 'key was removed' ) );
+
+// Cancel.
+$start_bg( array( 'ai_provider' => 'anthropic', 'ai_api_key_anthropic' => 'sk-bg', 'ai_mode' => 'background' ) );
+OGM_GPDM_AI::patch_status( array( 'mode' => 'background', 'phase' => 'submitted', 'provider' => 'anthropic', 'job' => array( 'id' => 'msgbatch_c', 'budget' => 32000 ) ) );
+$GLOBALS['ai_response'] = $json_ok( array( 'id' => 'msgbatch_c', 'processing_status' => 'canceling' ) );
+$cancel = OGM_GPDM_AI::cancel_job( $plugin );
+check( 'bg: cancel asks Anthropic to cancel and closes the run', true === $cancel && null !== $find_req( 'batches/msgbatch_c/cancel' ) && 'error' === OGM_GPDM_AI::status()['state'] && 'Review canceled.' === OGM_GPDM_AI::status()['message'] );
+OGM_GPDM_AI::set_status( 'running' );
+OGM_GPDM_AI::patch_status( array( 'mode' => 'direct', 'phase' => 'calling' ) );
+check( 'bg: a direct call can’t be canceled', is_wp_error( OGM_GPDM_AI::cancel_job( $plugin ) ) );
+
+// OpenAI: background response.
+$start_bg( array( 'ai_provider' => 'openai', 'ai_api_key_openai' => 'sk-oa', 'ai_model' => 'gpt-6.1-sol', 'ai_mode' => 'background' ) );
+$GLOBALS['ai_response'] = $json_ok( array( 'id' => 'resp_42', 'status' => 'queued' ) );
+$result = OGM_GPDM_AI::run_review( $plugin );
+$sub    = $GLOBALS['ai_requests'][0];
+$ob     = json_decode( $sub['args']['body'], true );
+check( 'bg openai: posts a background response', 'submitted' === $result && false !== strpos( $sub['url'], '/v1/responses' ) && true === $ob['background'] && true === $ob['store'] );
+check( 'bg openai: model, effort, allowance, system + user prompts', 'gpt-6.1-sol' === $ob['model'] && 'medium' === $ob['reasoning']['effort'] && 32000 === $ob['max_output_tokens'] && false !== strpos( $ob['instructions'], 'dark mode' ) && 'user' === $ob['input'][0]['role'] && false !== strpos( $ob['input'][0]['content'], 'AI Context Bundle' ) );
+check( 'bg openai: bearer auth', 'Bearer sk-oa' === $sub['args']['headers']['authorization'] );
+check( 'bg openai: page note says background mode', false !== strpos( OGM_GPDM_AI::status()['message'], 'OpenAI' ) );
+
+$force_check();
+$GLOBALS['ai_get'] = array( 'responses/resp_42' => $json_ok( array( 'id' => 'resp_42', 'status' => 'in_progress' ) ) );
+check( 'bg openai: in_progress stays running', 'running' === OGM_GPDM_AI::polled_status( $plugin )['state'] );
+
+$force_check();
+$GLOBALS['ai_requests'] = array();
+$GLOBALS['ai_get'] = array( 'responses/resp_42' => $json_ok( array(
+	'id'     => 'resp_42',
+	'status' => 'completed',
+	'output' => array(
+		array( 'type' => 'reasoning', 'summary' => array() ),
+		array( 'type' => 'message', 'role' => 'assistant', 'content' => array( array( 'type' => 'output_text', 'text' => $css_reply ) ) ),
+	),
+) ) );
+$polled = OGM_GPDM_AI::polled_status( $plugin );
+$prop   = OGM_GPDM_AI::proposal();
+check( 'bg openai: completed → proposal stored + done', 'done' === $polled['state'] && null !== $prop && false !== strpos( $prop['css'], '.bg-test' ) && 'openai' === $prop['provider'] );
+check( 'bg openai: response deleted at OpenAI afterwards', null !== $find_req( 'responses/resp_42', 'DELETE' ) );
+
+$run_oa = function ( $response ) use ( $start_bg, $json_ok, $plugin ) {
+	$start_bg( array( 'ai_provider' => 'openai', 'ai_api_key_openai' => 'sk-oa', 'ai_mode' => 'background' ) );
+	OGM_GPDM_AI::patch_status( array( 'mode' => 'background', 'phase' => 'submitted', 'provider' => 'openai', 'model' => 'gpt-6.1-sol', 'effort' => 'high', 'checked' => time() - 60, 'job' => array( 'id' => 'resp_7', 'budget' => 48000 ) ) );
+	$GLOBALS['ai_get'] = array( 'responses/resp_7' => $json_ok( $response ) );
+	return OGM_GPDM_AI::polled_status( $plugin );
+};
+$polled = $run_oa( array( 'id' => 'resp_7', 'status' => 'incomplete', 'incomplete_details' => array( 'reason' => 'max_output_tokens' ), 'output' => array() ) );
+check( 'bg openai: incomplete at max_output_tokens → allowance error', 'error' === $polled['state'] && false !== strpos( $polled['message'], '48,000 tokens' ) );
+$polled = $run_oa( array( 'id' => 'resp_7', 'status' => 'failed', 'error' => array( 'message' => 'server exploded' ) ) );
+check( 'bg openai: failed surfaces the error', 'error' === $polled['state'] && false !== strpos( $polled['message'], 'server exploded' ) );
+$polled = $run_oa( array( 'id' => 'resp_7', 'status' => 'completed', 'output' => array( array( 'type' => 'message', 'content' => array( array( 'type' => 'refusal', 'refusal' => 'cannot help' ) ) ) ) ) );
+check( 'bg openai: a refusal surfaces', 'error' === $polled['state'] && false !== strpos( $polled['message'], 'declined' ) );
+
+// The cron check re-queues itself while the job runs.
+$start_bg( array( 'ai_provider' => 'openai', 'ai_api_key_openai' => 'sk-oa', 'ai_mode' => 'background' ) );
+OGM_GPDM_AI::patch_status( array( 'mode' => 'background', 'phase' => 'submitted', 'provider' => 'openai', 'checked' => time(), 'job' => array( 'id' => 'resp_8', 'budget' => 32000 ) ) );
+$GLOBALS['ai_get'] = array( 'responses/resp_8' => $json_ok( array( 'id' => 'resp_8', 'status' => 'in_progress' ) ) );
+$plugin->run_ai_check_cron();
+check( 'bg: the cron check forces a provider call (ignores the throttle)', null !== $find_req( 'responses/resp_8', 'GET' ) );
+
+// Dead direct runs: the phase says what happened, Automatic learns.
+delete_option( OGM_GPDM_AI::CAPPED_KEY );
+$GLOBALS['wp_options']['ogm_gpdm_settings'] = array( 'ai_provider' => 'anthropic', 'ai_api_key_anthropic' => 'sk-x', 'ai_mode' => '' );
+reset_settings_cache( $plugin );
+OGM_GPDM_AI::set_status( 'running' );
+OGM_GPDM_AI::patch_status( array( 'mode' => 'direct', 'phase' => 'calling', 'phase_at' => time() - 30, 'effort' => 'high' ) );
+check( 'dead run: a direct call inside its time limit is still running', 'running' === OGM_GPDM_AI::polled_status( $plugin )['state'] );
+OGM_GPDM_AI::patch_status( array( 'phase_at' => time() - 800, 'started' => time() - 810 ) );
+$polled = OGM_GPDM_AI::polled_status( $plugin );
+check( 'dead run: a call past its time limit = the host ended it', 'error' === $polled['state'] && false !== strpos( $polled['message'], 'host ended the request' ) );
+check( 'dead run: Automatic learns → next review goes to the background', (bool) get_option( OGM_GPDM_AI::CAPPED_KEY ) && true === OGM_GPDM_AI::uses_background( $plugin->settings() ) );
+
+delete_option( OGM_GPDM_AI::CAPPED_KEY );
+$GLOBALS['wp_options']['ogm_gpdm_settings']['ai_mode'] = 'direct';
+reset_settings_cache( $plugin );
+OGM_GPDM_AI::set_status( 'running' );
+OGM_GPDM_AI::patch_status( array( 'mode' => 'direct', 'phase' => 'calling', 'phase_at' => time() - 1000, 'started' => time() - 1000, 'effort' => 'low' ) );
+$polled = OGM_GPDM_AI::polled_status( $plugin );
+check( 'dead run: explicit Direct → advice to switch, no silent learning', false !== strpos( $polled['message'], 'Set Review mode to Background' ) && ! get_option( OGM_GPDM_AI::CAPPED_KEY ) );
+
+OGM_GPDM_AI::set_status( 'running' );
+OGM_GPDM_AI::patch_status( array( 'started' => time() - 1000, 'phase' => 'queued' ) );
+check( 'dead run: never picked up = cron', false !== strpos( OGM_GPDM_AI::polled_status( $plugin )['message'], 'WP-Cron' ) );
+OGM_GPDM_AI::set_status( 'running' );
+OGM_GPDM_AI::patch_status( array( 'started' => time() - 1000, 'phase' => 'bundle' ) );
+check( 'dead run: died while gathering CSS says so', false !== strpos( OGM_GPDM_AI::polled_status( $plugin )['message'], 'gathering the site' ) );
+
+// A direct review that succeeds in Direct mode clears the learned flag.
+update_option( OGM_GPDM_AI::CAPPED_KEY, time() );
+$GLOBALS['wp_options']['ogm_gpdm_settings'] = array( 'ai_provider' => 'anthropic', 'ai_api_key_anthropic' => 'sk-x', 'ai_mode' => 'direct' );
+reset_settings_cache( $plugin );
+OGM_GPDM_AI::set_status( 'running' );
+$GLOBALS['ai_requests'] = array();
+$GLOBALS['ai_response'] = $json_ok( array( 'stop_reason' => 'end_turn', 'content' => array( array( 'type' => 'text', 'text' => $css_reply ) ) ) );
+$plugin->run_ai_review_cron();
+check( 'direct: success in Direct mode clears the learned flag', 'done' === OGM_GPDM_AI::status()['state'] && ! get_option( OGM_GPDM_AI::CAPPED_KEY ) );
+check( 'direct: the call phase was recorded with its effort', false !== strpos( $GLOBALS['ai_requests'][0]['url'], 'api.anthropic.com/v1/messages' ) );
+
+// The worker hands a background job to the cron check.
+$GLOBALS['wp_options']['ogm_gpdm_settings']['ai_mode'] = 'background';
+reset_settings_cache( $plugin );
+OGM_GPDM_AI::set_status( 'running' );
+$GLOBALS['ai_response'] = $json_ok( array( 'id' => 'msgbatch_w', 'processing_status' => 'in_progress' ) );
+$plugin->run_ai_review_cron();
+check( 'worker: a submitted job stays running (no premature done)', 'running' === OGM_GPDM_AI::status()['state'] && 'msgbatch_w' === OGM_GPDM_AI::status()['job']['id'] );
+
+$GLOBALS['ai_get'] = array();
+delete_option( OGM_GPDM_AI::STATUS_KEY );
+delete_option( OGM_GPDM_AI::PROPOSAL_KEY );
+delete_option( OGM_GPDM_AI::CAPPED_KEY );
+
+
+// ---- v1.10.0: measured contrast check + Claude in Chrome ----
+require_once dirname( __DIR__ ) . '/includes/class-ogm-gpdm-audit.php';
+delete_option( OGM_GPDM_Audit::OPTION );
+
+$pages = OGM_GPDM_Audit::pages();
+$labels = array_map( function ( $p ) { return $p['label']; }, $pages );
+check( 'audit pages: home, post, page, category, search, 404', array( 'Homepage', 'Latest post', 'A page', 'Category archive', 'Search results', 'Not found (404)' ) === $labels );
+check( 'audit pages: all on this site', count( array_filter( $pages, function ( $p ) { return 0 === strpos( $p['url'], 'https://example.test/' ); } ) ) === count( $pages ) );
+check( 'audit: own-host check rejects other hosts', OGM_GPDM_Audit::is_own_url( 'https://example.test/x' ) && ! OGM_GPDM_Audit::is_own_url( 'https://evil.test/x' ) && ! OGM_GPDM_Audit::is_own_url( 'javascript:alert(1)' ) );
+
+$browser = array(
+	'width' => 1280,
+	'pages' => array(
+		array(
+			'url' => 'https://example.test/', 'label' => 'Homepage', 'ok' => true, 'texts' => 310, 'interactive' => 44,
+			'dark_total' => 3, 'light_total' => 1, 'island_total' => 1,
+			'failures' => array(
+				array( 'selector' => '#footer .widget a', 'sample' => 'Privacy', 'fg' => '#555555', 'bg' => '#222222', 'ratio' => 2.1, 'need' => 4.5, 'count' => 6, 'state' => 'normal', 'also_light' => false ),
+				array( 'selector' => '.main-navigation a', 'sample' => 'Home', 'fg' => '#1D428A', 'bg' => '#101010', 'ratio' => 1.9, 'need' => 4.5, 'count' => 1, 'state' => 'hover' ),
+				array( 'selector' => '<script>alert(1)</script>', 'sample' => "x\ny", 'fg' => 'red', 'bg' => '#000000', 'ratio' => 3 ), // bad color: dropped
+				array( 'selector' => '.big h1', 'fg' => '#777777', 'bg' => '#333333', 'ratio' => 99, 'need' => 3, 'state' => 'sideways', 'also_light' => 1 ),
+			),
+			'islands' => array( array( 'selector' => '.card.white', 'bg' => '#ffffff', 'w' => 600, 'h' => 300 ), array( 'selector' => '.bad', 'bg' => 'white' ) ),
+		),
+		array( 'url' => 'https://evil.test/', 'label' => 'Elsewhere', 'ok' => true ), // foreign host: dropped
+		array( 'url' => 'https://example.test/gpdm-contrast-check-not-found/', 'label' => 'Not found (404)', 'ok' => false, 'error' => 'the page could not be rendered' ),
+	),
+);
+$saved = OGM_GPDM_Audit::save_from_json( json_encode( $browser ) );
+check( 'audit save: stored', is_array( $saved ) && null !== OGM_GPDM_Audit::get() );
+check( 'audit save: foreign-host page dropped', 2 === count( $saved['pages'] ) );
+$f = $saved['pages'][0]['failures'];
+check( 'audit save: rows with invalid colors dropped, hex lowercased', 3 === count( $f ) && '#1d428a' === $f[1]['fg'] );
+check( 'audit save: ratio clamped to 21, need 3 kept, bad state → normal', 21.0 === $f[2]['ratio'] && 3.0 === $f[2]['need'] && 'normal' === $f[2]['state'] && true === $f[2]['also_light'] );
+check( 'audit save: hover state kept', 'hover' === $f[1]['state'] );
+check( 'audit save: islands validated', 1 === count( $saved['pages'][0]['islands'] ) && '#ffffff' === $saved['pages'][0]['islands'][0]['bg'] );
+check( 'audit save: garbage rejected', is_wp_error( OGM_GPDM_Audit::save_from_json( '{"pages":[]}' ) ) && is_wp_error( OGM_GPDM_Audit::save_from_json( 'not json' ) ) );
+$t = OGM_GPDM_Audit::totals( $saved );
+check( 'audit totals: failed pages excluded', 1 === $t['ok'] && 3 === $t['dark'] && 1 === $t['light'] && 1 === $t['islands'] );
+
+$amd = OGM_GPDM_Audit::to_markdown( $saved );
+check( 'audit md: section heading + method', false !== strpos( $amd, '## 6. Measured contrast in dark mode' ) && false !== strpos( $amd, 'scripts off' ) );
+check( 'audit md: worst first, hover marked', strpos( $amd, '.main-navigation a` [hover]' ) < strpos( $amd, '#footer .widget a' ) );
+check( 'audit md: dark-only before light-too', strpos( $amd, '#footer .widget a' ) < strpos( $amd, '.big h1' ) && false !== strpos( $amd, 'also fails in light mode' ) );
+check( 'audit md: counts, page labels, failed page reason', false !== strpos( $amd, '×6' ) && false !== strpos( $amd, '· Homepage' ) && false !== strpos( $amd, 'not checked: the page could not be rendered' ) );
+check( 'audit md: light panels listed', false !== strpos( $amd, '`.card.white` — background #ffffff, 600×300px' ) );
+check( 'audit md: the script selector is inert text, not markup', false === strpos( $amd, '<script>' ) );
+
+// The bundle carries it, the prompt points at it.
+$GLOBALS['wp_options']['ogm_gpdm_settings'] = array( 'ai_provider' => 'anthropic', 'ai_api_key_anthropic' => 'sk-a', 'ai_mode' => 'direct' );
+reset_settings_cache( $plugin );
+$bmd = OGM_GPDM_Bundle::to_markdown( OGM_GPDM_Bundle::assemble( $plugin ) );
+check( 'bundle: section 6 present with the measured rows', false !== strpos( $bmd, '## 6. Measured contrast in dark mode' ) && false !== strpos( $bmd, '#footer .widget a' ) );
+check( 'bundle: contract says section 6 is measured', false !== strpos( $bmd, 'Section 6, when present' ) );
+check( 'prompt: MEASURED PROBLEMS instruction when the bundle has a check', false !== strpos( OGM_GPDM_AI::build_user_prompt( $bmd ), 'MEASURED PROBLEMS' ) );
+check( 'prompt: no measured instruction without a check', false === strpos( OGM_GPDM_AI::build_user_prompt( 'bundle without section six' ), 'MEASURED PROBLEMS' ) );
+$GLOBALS['ai_requests'] = array();
+$GLOBALS['ai_response'] = array( 'code' => 200, 'body' => json_encode( array( 'stop_reason' => 'end_turn', 'content' => array( array( 'type' => 'text', 'text' => "```css\nhtml[data-theme=\"dark\"] .m { color: #fff; }\n```" ) ) ) ) );
+OGM_GPDM_AI::run_review( $plugin );
+$sent = json_decode( $GLOBALS['ai_requests'][0]['args']['body'], true );
+check( 'review: the request carries the measured section', false !== strpos( $sent['messages'][0]['content'], '## 6. Measured contrast in dark mode' ) && false !== strpos( $sent['messages'][0]['content'], 'MEASURED PROBLEMS' ) );
+
+// Claude in Chrome prompt.
+update_option( OGM_GPDM_AI::AI_CSS_KEY, 'html[data-theme="dark"] .ai-now { color: #eee; }', true );
+$GLOBALS['wp_options']['ogm_gpdm_settings']['custom_css'] = '.manual-now { color: #000; }';
+reset_settings_cache( $plugin );
+$cp = OGM_GPDM_Audit::chrome_prompt( $plugin );
+check( 'chrome prompt: site, pages, how dark mode works', false !== strpos( $cp, 'Example Site' ) && false !== strpos( $cp, 'https://example.test/category/news/' ) && false !== strpos( $cp, 'data-theme="dark"' ) );
+check( 'chrome prompt: measured problems, current AI + Manual CSS, deliverable', false !== strpos( $cp, '#footer .widget a' ) && false !== strpos( $cp, '.ai-now' ) && false !== strpos( $cp, '.manual-now' ) && false !== strpos( $cp, 'ONE ```css code block' ) );
+check( 'chrome prompt: no API key, no functions.php', false === strpos( $cp, 'sk-a' ) && false === strpos( $cp, 'functions.php' ) );
+delete_option( OGM_GPDM_Audit::OPTION );
+check( 'chrome prompt: says when nothing was measured', false !== strpos( OGM_GPDM_Audit::chrome_prompt( $plugin ), 'contrast check hasn\'t been run' ) );
+
+// Pasting Claude's reply as a proposal.
+delete_option( OGM_GPDM_AI::PROPOSAL_KEY );
+$r1 = OGM_GPDM_AI::store_pasted_proposal( "- Fixed the footer links.\n\n```css\nhtml[data-theme=\"dark\"] #footer a { color: #ddd; }\n```" );
+$pp = OGM_GPDM_AI::proposal();
+check( 'paste: a full reply becomes a proposal (notes + css)', true === $r1 && false !== strpos( $pp['css'], '#footer a' ) && false !== strpos( $pp['notes'], 'footer links' ) && 'Pasted' === $pp['provider'] && 'Claude in Chrome' === $pp['model'] );
+delete_option( OGM_GPDM_AI::PROPOSAL_KEY );
+check( 'paste: bare CSS without data-theme still accepted', true === OGM_GPDM_AI::store_pasted_proposal( ':root { --x: #000; }' ) && false !== strpos( OGM_GPDM_AI::proposal()['css'], '--x' ) );
+check( 'paste: empty or CSS-less input rejected', is_wp_error( OGM_GPDM_AI::store_pasted_proposal( '   ' ) ) && is_wp_error( OGM_GPDM_AI::store_pasted_proposal( 'Thanks, all done!' ) ) );
+delete_option( OGM_GPDM_AI::PROPOSAL_KEY );
+delete_option( OGM_GPDM_AI::AI_CSS_KEY );
+
+
+// ---- v1.11.0: GP's light surfaces darkened in the gp-chrome module output ----
+$GLOBALS['wp_options']['generate_settings'] = array(
+	'global_colors'           => array( array( 'slug' => 'base-3', 'color' => '#ffffff' ), array( 'slug' => 'brand', 'color' => '#0b2545' ) ),
+	'header_background_color' => 'var(--base-3)',
+	'footer_background_color' => 'var(--brand)',
+);
+$GLOBALS['wp_options']['ogm_gpdm_settings'] = array( 'modules' => array( 'gp-chrome' => 1 ) );
+reset_settings_cache( $plugin );
+$mods = $plugin->modules_css();
+check( 'gp surfaces: the light header is darkened in the module output', false !== strpos( $mods, 'html[data-theme="dark"] .site-header' ) );
+check( 'gp surfaces: the brand-colored footer is left alone', false === strpos( $mods, '.site-info {' ) );
+$GLOBALS['wp_options']['ogm_gpdm_settings'] = array( 'modules' => array( 'gp-chrome' => 0 ) );
+reset_settings_cache( $plugin );
+check( 'gp surfaces: none when the GeneratePress module is off', false === strpos( $plugin->modules_css(), '.site-header' ) );
+$GLOBALS['wp_options']['ogm_gpdm_settings'] = array( 'modules' => array( 'gp-chrome' => 1 ), 'enable_generated' => 1 );
+update_option( OGM_GP_Dark_Mode::GEN_KEY, "html[data-theme=\"dark\"] {\n\t--base-3: #121212;\n}", true );
+reset_settings_cache( $plugin );
+check( 'gp surfaces: the enabled palette remaps base-3, so no override', false === strpos( $plugin->modules_css(), '.site-header' ) );
+$GLOBALS['wp_options']['ogm_gpdm_settings']['enable_generated'] = 0;
+reset_settings_cache( $plugin );
+check( 'gp surfaces: palette stored but disabled → the override is back', false !== strpos( $plugin->modules_css(), '.site-header' ) );
+delete_option( OGM_GP_Dark_Mode::GEN_KEY );
+unset( $GLOBALS['wp_options']['generate_settings'] );
+
+
+// ---- v1.11.1: review instructions ride Save Settings ----
+update_option( 'ogm_gpdm_ai_instructions', 'Old instructions from the last review', false );
+$san = $plugin->sanitize_settings( array( 'default_theme' => 'light', 'ai_instructions' => '' ) );
+check( 'instructions: an emptied box clears them on Save Settings', '' === get_option( 'ogm_gpdm_ai_instructions' ) );
+check( 'instructions: never stored in the settings array', ! array_key_exists( 'ai_instructions', $san ) );
+$plugin->sanitize_settings( array( 'ai_instructions' => "  Fix the footer links.\nAnd the sidebar.  " ) );
+check( 'instructions: new text saved (sanitized, multi-line kept)', "Fix the footer links.\nAnd the sidebar." === get_option( 'ogm_gpdm_ai_instructions' ) );
+$plugin->sanitize_settings( array( 'default_theme' => 'dark' ) );
+check( 'instructions: an update without the field leaves them alone', "Fix the footer links.\nAnd the sidebar." === get_option( 'ogm_gpdm_ai_instructions' ) );
+$plugin->sanitize_settings( array( 'ai_instructions' => str_repeat( 'x', 5000 ) ) );
+check( 'instructions: capped at 4,000 characters', 4000 === strlen( get_option( 'ogm_gpdm_ai_instructions' ) ) );
+delete_option( 'ogm_gpdm_ai_instructions' );
+
+
+// ---- v1.12.0: settings Export / Import ----
+require_once dirname( __DIR__ ) . '/includes/class-ogm-gpdm-transfer.php';
+$site_a = array(
+	'default_theme' => 'dark', 'respect_system' => 1, 'show_toggle' => 1, 'accent_nav' => 1, 'enable_generated' => 1, 'enable_ai_css' => 1, 'enable_custom_css' => 1,
+	'modules' => array( 'gp-chrome' => 1, 'revcontent' => 1, 'forminator' => 0 ),
+	'ai_provider' => 'anthropic', 'ai_model' => 'claude-opus-5-5', 'ai_effort' => 'high', 'ai_mode' => 'background',
+	'ai_api_key_anthropic' => 'sk-ant-SITE-A', 'ai_api_key_openai' => '', 'custom_css' => 'html[data-theme="dark"] .a-manual { color: #fff; }',
+);
+$GLOBALS['wp_options']['ogm_gpdm_settings'] = $site_a;
+update_option( OGM_GP_Dark_Mode::GEN_KEY, "html[data-theme=\"dark\"] {\n\t--base-3: #121212;\n}", true );
+update_option( OGM_GPDM_AI::AI_CSS_KEY, 'html[data-theme="dark"] .a-ai { color: #eee; }', true );
+update_option( OGM_GPDM_AI::INSTRUCTIONS_KEY, 'Site A instructions', false );
+update_option( 'ogm_gpdm_ai_models', array( 'anthropic' => array( 'ids' => array( 'x' ) ) ) );
+reset_settings_cache( $plugin );
+
+$doc = OGM_GPDM_Transfer::build_export( $plugin );
+check( 'export: identifies itself (plugin, format, version, site)', 'gp-dark-mode' === $doc['plugin'] && 1 === $doc['format'] && OGM_GPDM_VERSION === $doc['version'] && 'https://example.test/' === $doc['site'] );
+check( 'export: no API keys by default', ! isset( $doc['settings']['ai_api_key_anthropic'] ) && ! isset( $doc['settings']['ai_api_key_openai'] ) && false === $doc['includes_api_keys'] && false === strpos( json_encode( $doc ), 'SITE-A' ) );
+check( 'export: settings, modules and every layer included', 'dark' === $doc['settings']['default_theme'] && 1 === $doc['settings']['modules']['revcontent'] && false !== strpos( $doc['manual_css'], '.a-manual' ) && false !== strpos( $doc['generated_css'], '--base-3' ) && false !== strpos( $doc['ai_css'], '.a-ai' ) && 'Site A instructions' === $doc['ai_instructions'] );
+check( 'export: Manual CSS travels as manual_css, not inside settings', ! isset( $doc['settings']['custom_css'] ) );
+check( 'export: site-specific state left out', ! isset( $doc['ai_models'] ) && ! isset( $doc['audit'] ) && false === strpos( json_encode( $doc ), 'ai_models' ) );
+$doc_keys = OGM_GPDM_Transfer::build_export( $plugin, true );
+check( 'export: keys included only when asked', 'sk-ant-SITE-A' === $doc_keys['settings']['ai_api_key_anthropic'] && true === $doc_keys['includes_api_keys'] );
+check( 'export: filename names the host', 0 === strpos( OGM_GPDM_Transfer::export_filename(), 'gp-dark-mode-settings-example.test-' ) );
+
+// Parsing guards.
+check( 'import: empty / not JSON / other plugin rejected', is_wp_error( OGM_GPDM_Transfer::parse( '' ) ) && is_wp_error( OGM_GPDM_Transfer::parse( 'nope' ) ) && is_wp_error( OGM_GPDM_Transfer::parse( '{"plugin":"other","format":1,"settings":{}}' ) ) );
+check( 'import: unknown format and missing settings rejected', is_wp_error( OGM_GPDM_Transfer::parse( '{"plugin":"gp-dark-mode","format":9,"settings":{}}' ) ) && is_wp_error( OGM_GPDM_Transfer::parse( '{"plugin":"gp-dark-mode","format":1}' ) ) );
+check( 'import: oversized file rejected', is_wp_error( OGM_GPDM_Transfer::parse( str_repeat( ' ', OGM_GPDM_Transfer::MAX_BYTES + 1 ) ) ) );
+$sneaky = json_decode( json_encode( $doc ), true );
+$sneaky['settings']['evil_key'] = 'x';
+$sneaky['settings']['ai_api_key_anthropic'] = 'sk-smuggled';
+$parsed = OGM_GPDM_Transfer::parse( json_encode( $sneaky ) );
+check( 'import: unknown settings dropped; keys ignored unless the file says it includes them', ! isset( $parsed['settings']['evil_key'] ) && ! isset( $parsed['settings']['ai_api_key_anthropic'] ) );
+
+// Site B: different everything, its own key.
+$site_b = array( 'default_theme' => 'light', 'respect_system' => 0, 'accent_nav' => 0, 'enable_generated' => 0, 'modules' => array( 'gp-chrome' => 1, 'revcontent' => 0, 'forminator' => 1, 'contact-form-7' => 1 ), 'ai_provider' => 'openai', 'ai_effort' => '', 'ai_mode' => '', 'ai_api_key_anthropic' => 'sk-ant-SITE-B', 'ai_api_key_openai' => 'sk-oa-SITE-B', 'custom_css' => '.b-manual { color: red; }' );
+$GLOBALS['wp_options']['ogm_gpdm_settings'] = $site_b;
+update_option( OGM_GP_Dark_Mode::GEN_KEY, '', true );
+update_option( OGM_GPDM_AI::AI_CSS_KEY, '.b-ai {}', true );
+update_option( OGM_GPDM_AI::INSTRUCTIONS_KEY, 'Site B instructions', false );
+delete_option( OGM_GPDM_Transfer::BACKUP_KEY );
+reset_settings_cache( $plugin );
+$b_before = $GLOBALS['wp_options']['ogm_gpdm_settings'];
+
+$older = json_decode( json_encode( $doc ), true );
+unset( $older['settings']['modules']['contact-form-7'] ); // As if exported by a version without that module.
+$import = OGM_GPDM_Transfer::parse( json_encode( $older ) );
+$diff   = OGM_GPDM_Transfer::diff( $plugin, $import );
+$labels = array_map( function ( $r ) { return $r[0]; }, $diff['settings'] );
+check( 'preview: lists the setting changes', in_array( 'Default theme', $labels, true ) && in_array( 'Review mode', $labels, true ) && in_array( 'AI provider', $labels, true ) );
+check( 'preview: lists module changes, not unknown ones', 2 === count( $diff['modules'] ) );
+check( 'preview: stylesheets compared, instructions flagged', 3 === count( $diff['css'] ) && true === $diff['instructions'] );
+check( 'preview: says this site keeps its keys', (bool) array_filter( $diff['notes'], function ( $n ) { return false !== strpos( $n, 'keys stay as they are' ); } ) );
+$html = OGM_GPDM_Transfer::preview_html( $plugin, $import );
+check( 'preview: HTML names the source and escapes values', false !== strpos( $html, 'https://example.test/' ) && false !== strpos( $html, '<table' ) );
+check( 'preview: writes nothing', $b_before === $GLOBALS['wp_options']['ogm_gpdm_settings'] && null === OGM_GPDM_Transfer::backup() );
+$newer = $older; $newer['version'] = '99.0.0';
+check( 'preview: warns about a newer exporting version', (bool) array_filter( OGM_GPDM_Transfer::diff( $plugin, OGM_GPDM_Transfer::parse( json_encode( $newer ) ) )['notes'], function ( $n ) { return false !== strpos( $n, 'newer version' ); } ) );
+
+// Apply.
+OGM_GPDM_Transfer::stash( $import );
+check( 'stash: held for this user', is_array( OGM_GPDM_Transfer::stashed() ) );
+OGM_GPDM_Transfer::apply( $plugin, $import );
+$after = $plugin->settings();
+check( 'apply: settings copied', 'dark' === $after['default_theme'] && 1 === $after['respect_system'] && 'background' === $after['ai_mode'] && 'claude-opus-5-5' === $after['ai_model'] && 'anthropic' === $after['ai_provider'] );
+check( 'apply: this site\'s API keys kept', 'sk-ant-SITE-B' === $after['ai_api_key_anthropic'] && 'sk-oa-SITE-B' === $after['ai_api_key_openai'] );
+check( 'apply: modules copied; one unknown to the file keeps this site\'s choice', 1 === $after['modules']['revcontent'] && 0 === $after['modules']['forminator'] && 1 === $after['modules']['contact-form-7'] );
+check( 'apply: every layer copied', false !== strpos( $plugin->custom_css(), '.a-manual' ) && false !== strpos( $plugin->generated_css(), '--base-3' ) && false !== strpos( OGM_GPDM_AI::ai_css(), '.a-ai' ) && 'Site A instructions' === get_option( OGM_GPDM_AI::INSTRUCTIONS_KEY ) );
+check( 'apply: backup of the previous state kept', null !== OGM_GPDM_Transfer::backup() && 'sk-ant-SITE-B' === OGM_GPDM_Transfer::backup()['settings']['ai_api_key_anthropic'] && '.b-ai {}' === OGM_GPDM_Transfer::backup()['ai_css'] );
+
+// Undo puts every bit back.
+check( 'undo: succeeds', true === OGM_GPDM_Transfer::undo( $plugin ) );
+$undone = $plugin->settings();
+check( 'undo: settings, keys and modules restored', 'light' === $undone['default_theme'] && 'openai' === $undone['ai_provider'] && 'sk-ant-SITE-B' === $undone['ai_api_key_anthropic'] && 0 === $undone['modules']['revcontent'] && 1 === $undone['modules']['forminator'] );
+check( 'undo: layers and instructions restored', '.b-manual { color: red; }' === $plugin->custom_css() && '' === $plugin->generated_css() && '.b-ai {}' === OGM_GPDM_AI::ai_css() && 'Site B instructions' === get_option( OGM_GPDM_AI::INSTRUCTIONS_KEY ) );
+check( 'undo: backup consumed; a second undo errors', null === OGM_GPDM_Transfer::backup() && is_wp_error( OGM_GPDM_Transfer::undo( $plugin ) ) );
+
+// Keys included: they replace this site's; an empty one leaves this site's alone.
+$with_keys = OGM_GPDM_Transfer::parse( json_encode( $doc_keys ) );
+OGM_GPDM_Transfer::apply( $plugin, $with_keys );
+check( 'apply with keys: the file\'s key replaces; an empty one doesn\'t erase', 'sk-ant-SITE-A' === $plugin->settings()['ai_api_key_anthropic'] && 'sk-oa-SITE-B' === $plugin->settings()['ai_api_key_openai'] );
+OGM_GPDM_Transfer::undo( $plugin );
+check( 'undo after a keyed import: this site\'s key back', 'sk-ant-SITE-B' === $plugin->settings()['ai_api_key_anthropic'] );
+
+// Imported CSS is sanitized like any other layer.
+$hostile = json_decode( json_encode( $doc ), true );
+$hostile['ai_css'] = '.x{color:red}</style><script>alert(1)</script>';
+OGM_GPDM_Transfer::apply( $plugin, OGM_GPDM_Transfer::parse( json_encode( $hostile ) ) );
+check( 'apply: CSS sanitized (no </style breakout)', false === stripos( OGM_GPDM_AI::ai_css(), '</style' ) );
+OGM_GPDM_Transfer::undo( $plugin );
+
+// A site whose Manual CSS was never saved: undo must leave it empty, not keep the import's.
+$GLOBALS['wp_options']['ogm_gpdm_settings'] = array( 'default_theme' => 'light', 'modules' => array( 'gp-chrome' => 1 ) );
+reset_settings_cache( $plugin );
+OGM_GPDM_Transfer::apply( $plugin, $import );
+check( 'never-saved Manual CSS: the import fills it', false !== strpos( $plugin->custom_css(), '.a-manual' ) );
+OGM_GPDM_Transfer::undo( $plugin );
+check( 'never-saved Manual CSS: undo empties it again', '' === $plugin->custom_css() );
+$GLOBALS['wp_options']['ogm_gpdm_settings'] = $b_before;
+reset_settings_cache( $plugin );
+
+// Round trip: export B, import into B → nothing changes.
+$self = OGM_GPDM_Transfer::parse( json_encode( OGM_GPDM_Transfer::build_export( $plugin ) ) );
+$d2   = OGM_GPDM_Transfer::diff( $plugin, $self );
+check( 'round trip: importing a site\'s own export changes nothing', empty( $d2['settings'] ) && empty( $d2['modules'] ) && ! array_filter( array_column( $d2['css'], 3 ) ) && false === $d2['instructions'] );
+
+delete_option( 'ogm_gpdm_ai_models' );
+delete_option( OGM_GPDM_Transfer::BACKUP_KEY );
+delete_option( OGM_GPDM_AI::INSTRUCTIONS_KEY );
+delete_option( OGM_GPDM_AI::AI_CSS_KEY );
+delete_option( OGM_GP_Dark_Mode::GEN_KEY );
 
 echo "\n$pass passed, $fail failed\n";
 echo 'Sample bundle: ' . strlen( $md ) . " bytes -> sample-bundle.md\n";

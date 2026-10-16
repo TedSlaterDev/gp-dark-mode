@@ -39,7 +39,11 @@ final class OGM_GPDM_Bundle {
 	 * @return array
 	 */
 	public static function assemble( OGM_GP_Dark_Mode $plugin ) {
+		if ( ! class_exists( 'OGM_GPDM_Audit' ) ) {
+			require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-audit.php';
+		}
 		return array(
+			'audit'        => OGM_GPDM_Audit::get(), // 1.10.0: the latest measured contrast check.
 			'meta'         => self::section_meta(),
 			'gp_config'    => self::section_gp_config(),
 			'plugin_state' => self::section_plugin_state( $plugin ),
@@ -65,8 +69,8 @@ final class OGM_GPDM_Bundle {
 		);
 	}
 
-	/** GeneratePress color configuration, read straight from the database. */
-	private static function section_gp_config() {
+	/** GeneratePress color configuration, read straight from the database (also used by the Claude in Chrome prompt). */
+	public static function section_gp_config() {
 		$out = array(
 			'global_colors'  => array(),
 			'color_settings' => array(),
@@ -865,6 +869,9 @@ final class OGM_GPDM_Bundle {
 		$md .= self::md_plugin_state( $bundle['plugin_state'] );
 		$md .= self::md_child_theme( $bundle['child_theme'] );
 		$md .= self::md_rendered( $bundle['rendered'] );
+		if ( ! empty( $bundle['audit'] ) ) {
+			$md .= OGM_GPDM_Audit::to_markdown( $bundle['audit'] );
+		}
 
 		$md .= "\n---\nEnd of bundle. Approximate size: " . size_format( strlen( $md ) )
 			. ' (~' . number_format( strlen( $md ) / 4 ) . " tokens).\n";
@@ -889,6 +896,7 @@ final class OGM_GPDM_Bundle {
 		$md .= "- GeneratePress's own Global Color variables may also be redefined under `html[data-theme=\"dark\"]` — high leverage, since GP paints most chrome with them.\n";
 		$md .= "- Deliverable: a COMPLETE replacement for the **Current AI stylesheet** (Layer 4a) section only. The **Manual CSS** (Layer 4b) is the owner's layer — it loads after yours and always wins; treat it as read-only context. Never propose edits to theme files.\n";
 		$md .= "- The static CSS below shows what is *written*, not what *wins* the cascade. Mark any proposal that depends on specificity or cascade order as needing visual verification.\n";
+		$md .= "- Section 6, when present, is different: contrast MEASURED in a browser with the current dark mode applied — what actually wins. Fix every dark-mode failure and light panel it lists.\n";
 		$md .= "- Stylesheets in this bundle are reduced to color-relevant declarations (best-effort); `@keyframes`/`@font-face` and layout properties are omitted on purpose.\n\n";
 
 		$md .= "## 1. Site\n\n" . self::fence( self::json( $meta ), 'json' );

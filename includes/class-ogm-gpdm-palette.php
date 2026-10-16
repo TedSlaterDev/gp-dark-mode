@@ -487,6 +487,126 @@ final class OGM_GPDM_Palette {
 		return $roles;
 	}
 
+	/* ---------------------------------------------------------------------
+	 * GeneratePress's own surfaces (1.11.0)
+	 * ------------------------------------------------------------------- */
+
+	/**
+	 * GP color settings that paint a surface, the selectors GP prints them on
+	 * (inc/css-output.php), and the plugin token that replaces them in dark
+	 * mode. Defaults: every one is var(--base-3) or var(--base) — white or
+	 * near-white — so on an untouched GP site they all stay light in dark mode.
+	 */
+	const GP_SURFACES = array(
+		'top_bar_background_color'        => array( '.top-bar', 'var(--surface)' ),
+		'header_background_color'         => array( '.site-header', 'var(--surface)' ),
+		'navigation_background_color'     => array( '.main-navigation, .main-navigation .menu-toggle', 'var(--surface)' ),
+		'subnavigation_background_color'  => array( '.main-navigation ul ul', 'var(--surface-2)' ),
+		'content_background_color'        => array( '.separate-containers .inside-article, .separate-containers .comments-area, .separate-containers .page-header, .one-container .container, .separate-containers .paging-navigation, .inside-page-header', 'var(--surface)' ),
+		'footer_widget_background_color'  => array( '.footer-widgets', 'var(--surface)' ),
+		'footer_background_color'         => array( '.site-info', 'var(--surface)' ),
+	);
+
+	/** A surface at or above this relative luminance counts as light. */
+	const LIGHT_SURFACE = 0.5;
+
+	/**
+	 * Dark-mode rules for the GeneratePress surfaces that are LIGHT in the
+	 * site's color settings (Customize → Colors), so an untouched GP site
+	 * doesn't keep a white header, comments box and footer with light text on
+	 * them. Surfaces that are already dark or brand-colored are left alone,
+	 * and so is anything the enabled generated palette already remaps (a
+	 * var(--slug) it redefines). Also darkens GP's search modal variables.
+	 *
+	 * @param array|null $settings GP settings merged with GP's defaults (null = read them).
+	 * @param array|null $colors   GP Global Colors (null = read them).
+	 * @param string[]   $handled  Global Color slugs the enabled generated palette redefines.
+	 * @return string CSS ('' when nothing is light, or GP isn't there).
+	 */
+	public static function gp_surfaces_css( $settings = null, $colors = null, array $handled = array() ) {
+		if ( null === $settings ) {
+			$saved    = get_option( 'generate_settings', array() );
+			$defaults = function_exists( 'generate_get_color_defaults' ) ? (array) generate_get_color_defaults() : array();
+			$settings = array_merge( $defaults, is_array( $saved ) ? $saved : array() );
+		}
+		if ( null === $colors ) {
+			$colors = self::global_colors();
+		}
+		if ( empty( $settings ) ) {
+			return '';
+		}
+
+		$by_slug = array();
+		foreach ( (array) $colors as $c ) {
+			if ( is_array( $c ) && isset( $c['slug'], $c['color'] ) ) {
+				$by_slug[ strtolower( (string) $c['slug'] ) ] = (string) $c['color'];
+			}
+		}
+		$handled = array_map( 'strtolower', $handled );
+
+		$rules = '';
+		foreach ( self::GP_SURFACES as $key => $target ) {
+			if ( ! self::gp_surface_is_light( isset( $settings[ $key ] ) ? $settings[ $key ] : '', $by_slug, $handled ) ) {
+				continue;
+			}
+			$selectors = array_map(
+				function ( $sel ) {
+					return 'html[data-theme="dark"] ' . trim( $sel );
+				},
+				explode( ',', $target[0] )
+			);
+			$rules .= implode( ",\n", $selectors ) . " {\n\tbackground-color: " . $target[1] . ";\n\tcolor: var(--text);\n}\n";
+		}
+
+		// GP's search modal (3.1+) reads two variables.
+		if ( self::gp_surface_is_light( isset( $settings['search_modal_bg_color'] ) ? $settings['search_modal_bg_color'] : '', $by_slug, $handled ) ) {
+			$rules .= "html[data-theme=\"dark\"] {\n\t--gp-search-modal-bg-color: var(--surface);\n\t--gp-search-modal-text-color: var(--text);\n}\n";
+		}
+
+		if ( '' === $rules ) {
+			return '';
+		}
+		return "\n/* GeneratePress surfaces that are light in Customize → Colors, darkened.\n"
+			. "   Computed from this site's settings: areas already dark or brand-colored\n"
+			. "   are left alone, as is anything the generated palette remaps. */\n" . $rules;
+	}
+
+	/**
+	 * Is a GP color setting a light surface this function should darken?
+	 * var(--slug) resolves through the Global Colors; a slug the enabled
+	 * palette redefines is the palette's job; anything unparseable is left alone.
+	 */
+	private static function gp_surface_is_light( $value, array $by_slug, array $handled ) {
+		$value = trim( (string) $value );
+		if ( '' === $value ) {
+			return false;
+		}
+		if ( preg_match( '~^var\(\s*--([\w-]+)\s*(?:,[^)]*)?\)$~i', $value, $m ) ) {
+			$slug = strtolower( $m[1] );
+			if ( in_array( $slug, $handled, true ) || ! isset( $by_slug[ $slug ] ) ) {
+				return false;
+			}
+			$value = $by_slug[ $slug ];
+		}
+		$rgb = self::parse_color( $value );
+		if ( null === $rgb ) {
+			return false;
+		}
+		return self::relative_luminance( sprintf( '#%02x%02x%02x', $rgb[0], $rgb[1], $rgb[2] ) ) >= self::LIGHT_SURFACE;
+	}
+
+	/**
+	 * Global Color slugs a generated palette's CSS redefines (its
+	 * `--slug: #hex` declarations), for gp_surfaces_css()'s $handled.
+	 */
+	public static function palette_slugs( $generated_css ) {
+		$slugs = array();
+		if ( preg_match_all( '~(?<![\w-])--([\w-]+)\s*:~', (string) $generated_css, $m ) ) {
+			$slugs = array_values( array_unique( array_map( 'strtolower', $m[1] ) ) );
+		}
+		return $slugs;
+	}
+
 	/** GP Global Colors as array of {name, slug, color}. */
 	private static function global_colors() {
 		if ( function_exists( 'generate_get_global_colors' ) ) {

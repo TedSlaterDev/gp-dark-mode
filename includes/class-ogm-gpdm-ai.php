@@ -27,6 +27,40 @@ final class OGM_GPDM_AI {
 	const ANTHROPIC_URL = 'https://api.anthropic.com/v1/messages';
 	const OPENAI_URL    = 'https://api.openai.com/v1/chat/completions';
 
+	/**
+	 * Background-mode endpoints (1.9.0): Anthropic's Message Batches API and
+	 * OpenAI's Responses API with background:true. Both accept the review and
+	 * return an id at once, so no PHP request ever waits on the model — hosts
+	 * such as WP Engine end any request after 60 seconds, and a High-effort
+	 * review takes several minutes.
+	 */
+	const ANTHROPIC_BATCH_URL = 'https://api.anthropic.com/v1/messages/batches';
+	const OPENAI_RESPONSES_URL = 'https://api.openai.com/v1/responses';
+
+	/** The one request inside each Anthropic batch. */
+	const BATCH_CUSTOM_ID = 'gpdm-review';
+
+	/** Cron hook that checks a background job while nobody has the page open. */
+	const CHECK_HOOK = 'ogm_gpdm_check_ai_job';
+
+	/** Minimum seconds between two provider checks of a background job. */
+	const CHECK_INTERVAL = 8;
+
+	/**
+	 * A background job with no outcome after this long is treated as failed.
+	 * Anthropic expires a batch after 24 hours, so a live provider always
+	 * answers first; this only catches a job the provider lost track of.
+	 */
+	const BACKGROUND_TIMEOUT = 93600; // 26 hours.
+
+	/**
+	 * Set (to a timestamp) when a direct review died mid-call — the host
+	 * ended the request. Automatic mode then uses background reviews on this
+	 * site. Unregistered, non-autoloaded; cleared by a successful review in
+	 * Direct mode.
+	 */
+	const CAPPED_KEY = 'ogm_gpdm_ai_host_capped';
+
 	/** Cached per-provider model lists (unregistered, non-autoloaded). */
 	const MODELS_KEY = 'ogm_gpdm_ai_models';
 
@@ -75,19 +109,60 @@ final class OGM_GPDM_AI {
 		return ( is_array( $status ) && isset( $status['state'] ) ) ? $status : null;
 	}
 
-	/** Write a status. */
+	/**
+	 * Write a status. 'running' starts a new run (fresh clock, phase
+	 * 'queued'); any other state closes the current one and drops its
+	 * in-flight fields. Since 1.9.0 a running status also carries:
+	 * mode (direct|background), phase (queued|bundle|calling|submitted) +
+	 * phase_at, the provider/model/effort of the call, and for background
+	 * runs the provider job id and the time of the last check.
+	 */
 	public static function set_status( $state, $message = '' ) {
 		$current = self::status();
-		update_option(
-			self::STATUS_KEY,
-			array(
-				'state'    => $state,
-				'message'  => mb_substr( (string) $message, 0, 600 ),
-				'started'  => ( 'running' === $state || null === $current ) ? time() : ( isset( $current['started'] ) ? (int) $current['started'] : time() ),
-				'finished' => ( 'running' === $state ) ? 0 : time(),
-			),
-			false
+		$status  = array(
+			'state'    => $state,
+			'message'  => mb_substr( (string) $message, 0, 600 ),
+			'started'  => ( 'running' === $state || null === $current ) ? time() : ( isset( $current['started'] ) ? (int) $current['started'] : time() ),
+			'finished' => ( 'running' === $state ) ? 0 : time(),
 		);
+		if ( 'running' === $state ) {
+			$status['phase']    = 'queued';
+			$status['phase_at'] = time();
+		} elseif ( null !== $current && isset( $current['mode'] ) ) {
+			$status['mode'] = $current['mode']; // Shown with the outcome.
+		}
+		update_option( self::STATUS_KEY, $status, false );
+	}
+
+	/** Merge fields into the current status (creating a running one if none). */
+	public static function patch_status( array $fields ) {
+		$status = self::status();
+		if ( null === $status ) {
+			$status = array(
+				'state'    => 'running',
+				'message'  => '',
+				'started'  => time(),
+				'finished' => 0,
+			);
+		}
+		if ( isset( $fields['message'] ) ) {
+			$fields['message'] = mb_substr( (string) $fields['message'], 0, 600 );
+		}
+		update_option( self::STATUS_KEY, array_merge( $status, $fields ), false );
+	}
+
+	/** Record how far a running review got — the diagnosis when a host kills it. */
+	public static function mark_phase( $phase, array $fields = array() ) {
+		$status = self::status();
+		if ( null === $status || 'running' !== $status['state'] ) {
+			return;
+		}
+		self::patch_status( array_merge( $fields, array( 'phase' => $phase, 'phase_at' => time() ) ) );
+	}
+
+	/** True when the running status belongs to a background job. */
+	private static function is_background_status( $status ) {
+		return is_array( $status ) && isset( $status['mode'] ) && 'background' === $status['mode'];
 	}
 
 	/** True while a fresh run is in flight. */
@@ -95,23 +170,137 @@ final class OGM_GPDM_AI {
 		$status = self::status();
 		return null !== $status
 			&& 'running' === $status['state']
-			&& ( time() - (int) $status['started'] ) < self::RUN_TIMEOUT;
+			&& null === self::stale_reason( $status );
 	}
 
 	/**
-	 * Status for the polling endpoint — converts a stale 'running' into an
-	 * error so the UI never spins forever when cron stalls.
+	 * Why a 'running' status can no longer finish, or null while it still
+	 * can. A direct run is bounded by its own HTTP timeout once the call has
+	 * started, and by RUN_TIMEOUT before that; a background job by
+	 * BACKGROUND_TIMEOUT. The phase it stopped in says what went wrong.
 	 */
-	public static function polled_status() {
+	private static function stale_reason( array $status ) {
+		$now     = time();
+		$started = isset( $status['started'] ) ? (int) $status['started'] : $now;
+		$phase   = isset( $status['phase'] ) ? (string) $status['phase'] : 'queued';
+
+		if ( self::is_background_status( $status ) && 'submitted' === $phase ) {
+			if ( $now - $started < self::BACKGROUND_TIMEOUT ) {
+				return null;
+			}
+			return __( 'The provider never returned a result for the background review. Try again.', 'gp-dark-mode' );
+		}
+
+		if ( 'calling' === $phase ) {
+			$effort   = isset( $status['effort'] ) ? $status['effort'] : null;
+			$at       = isset( $status['phase_at'] ) ? (int) $status['phase_at'] : $started;
+			$deadline = $at + self::effort_timeout( $effort ) + 60;
+			if ( $now < $deadline && $now - $started < self::RUN_TIMEOUT ) {
+				return null;
+			}
+			return 'host_stopped';
+		}
+
+		if ( $now - $started < self::RUN_TIMEOUT ) {
+			return null;
+		}
+		if ( 'queued' === $phase ) {
+			return __( 'The review never started: the site’s WP-Cron didn’t run it. Check that WP-Cron is working, then try again.', 'gp-dark-mode' );
+		}
+		return __( 'The review stopped while it was gathering the site’s CSS, before anything was sent to the model — the host may have ended the request. Try again; if it keeps happening, set Review mode to Background.', 'gp-dark-mode' );
+	}
+
+	/**
+	 * Status for the polling endpoint. Checks a background job with its
+	 * provider (throttled), and converts a stale 'running' into an error so
+	 * the UI never spins forever. A direct run that died mid-call means the
+	 * host ends long requests: in Automatic mode the next review on this
+	 * site goes to the background instead.
+	 */
+	public static function polled_status( $plugin = null ) {
 		$status = self::status();
 		if ( null === $status ) {
 			return array( 'state' => 'idle', 'message' => '' );
 		}
-		if ( 'running' === $status['state'] && ( time() - (int) $status['started'] ) >= self::RUN_TIMEOUT ) {
-			self::set_status( 'error', __( 'The review timed out or the site’s cron never ran it. Check that WP-Cron is working, then try again.', 'gp-dark-mode' ) );
-			return self::status();
+		if ( 'running' === $status['state'] && self::is_background_status( $status ) && $plugin instanceof OGM_GP_Dark_Mode ) {
+			self::check_job( $plugin );
+			$status = self::status();
+		}
+		if ( 'running' === $status['state'] ) {
+			$why = self::stale_reason( $status );
+			if ( 'host_stopped' === $why ) {
+				$seconds = max( 0, time() - ( isset( $status['phase_at'] ) ? (int) $status['phase_at'] : (int) $status['started'] ) );
+				$auto    = ! ( $plugin instanceof OGM_GP_Dark_Mode ) || '' === self::mode_setting( $plugin->settings() );
+				if ( $auto ) {
+					update_option( self::CAPPED_KEY, time(), false );
+				}
+				self::set_status(
+					'error',
+					$auto
+						? __( 'The review was sent to the model, but the site’s host ended the request before the reply came back — some hosts, such as WP Engine, stop any request after about a minute. Run it again: from now on this site sends reviews in the background, so no request has to wait.', 'gp-dark-mode' )
+						: __( 'The review was sent to the model, but the site’s host ended the request before the reply came back — some hosts, such as WP Engine, stop any request after about a minute. Set Review mode to Background (or Automatic) and run it again.', 'gp-dark-mode' )
+				);
+				return self::status();
+			}
+			if ( null !== $why ) {
+				self::set_status( 'error', $why );
+				return self::status();
+			}
 		}
 		return $status;
+	}
+
+	/* ---------------------------------------------------------------------
+	 * Review mode: direct call vs background job
+	 * ------------------------------------------------------------------- */
+
+	/** The saved Review mode setting: '' (Automatic), 'direct' or 'background'. */
+	public static function mode_setting( array $settings ) {
+		$mode = isset( $settings['ai_mode'] ) ? (string) $settings['ai_mode'] : '';
+		return in_array( $mode, array( 'direct', 'background' ), true ) ? $mode : '';
+	}
+
+	/**
+	 * Hosts known to end every request after about a minute, which a direct
+	 * review (minutes at High effort) can't survive. WP Engine documents a
+	 * 60-second limit that can't be raised. Filterable via
+	 * ogm_gpdm_ai_host_caps_requests.
+	 */
+	public static function host_caps_requests() {
+		$capped = function_exists( 'is_wpe' ) || defined( 'WPE_APIKEY' ) || class_exists( 'WpeCommon', false );
+		if ( function_exists( 'apply_filters' ) ) {
+			$capped = (bool) apply_filters( 'ogm_gpdm_ai_host_caps_requests', $capped );
+		}
+		return $capped;
+	}
+
+	/**
+	 * Why Automatic mode picks background on this site — 'host' (a known
+	 * capped host), 'learned' (a direct review here was cut off) — or ''
+	 * when it calls the model directly.
+	 */
+	public static function auto_background_reason() {
+		if ( self::host_caps_requests() ) {
+			return 'host';
+		}
+		return get_option( self::CAPPED_KEY ) ? 'learned' : '';
+	}
+
+	/** Whether the next review runs as a background job. */
+	public static function uses_background( array $settings ) {
+		$mode = self::mode_setting( $settings );
+		if ( '' !== $mode ) {
+			return 'background' === $mode;
+		}
+		return '' !== self::auto_background_reason();
+	}
+
+	/** Queue a background check unless one is already queued. */
+	public static function schedule_check( $delay = 60 ) {
+		if ( function_exists( 'wp_next_scheduled' ) && wp_next_scheduled( self::CHECK_HOOK ) ) {
+			return;
+		}
+		wp_schedule_single_event( time() + max( 1, (int) $delay ), self::CHECK_HOOK );
 	}
 
 	/** Providers and their default models. */
@@ -472,6 +661,16 @@ final class OGM_GPDM_AI {
 			. "light islands in dark mode, missing dark overrides for widgets that appear in the rendered capture), prune rules "
 			. "made redundant by the enabled modules, and keep everything else stable.\n\n";
 
+		// 1.10.0: the measured contrast check, when the bundle carries one.
+		if ( false !== strpos( (string) $bundle_md, '## 6. Measured contrast in dark mode' ) ) {
+			$prompt .= "MEASURED PROBLEMS — section 6 of the bundle lists contrast failures and light panels measured in a browser "
+				. "with the current dark mode applied (including the current AI stylesheet). Fix every dark-mode failure listed there: "
+				. "text must reach 4.5:1 against its actual background (3:1 for large text). When many failures share a cause, fix the "
+				. "cause (a Global Color or palette variable) rather than each selector. Failures marked 'also fails in light mode' are the "
+				. "site's own design — fix them in dark mode only if that's simple. Light panels: darken them unless the selector shows "
+				. "they're intentional (a logo plate, an ad slot's backing).\n\n";
+		}
+
 		$instructions = trim( (string) $instructions );
 		if ( '' !== $instructions ) {
 			$prompt .= "SITE OWNER'S INSTRUCTIONS FOR THIS REVIEW — these are specific fixes the owner has already identified; "
@@ -529,11 +728,49 @@ final class OGM_GPDM_AI {
 	 * ------------------------------------------------------------------- */
 
 	/**
-	 * Assemble the bundle, call the configured provider, store the proposal.
+	 * Assemble the bundle, then either call the configured provider and store
+	 * the proposal (direct mode) or hand the review to the provider as a
+	 * background job (see uses_background()).
 	 *
-	 * @return true|WP_Error
+	 * @return true|string|WP_Error true = proposal stored; 'submitted' = a
+	 *                              background job is running; WP_Error.
 	 */
 	public static function run_review( OGM_GP_Dark_Mode $plugin ) {
+		$req = self::prepare( $plugin );
+		if ( is_wp_error( $req ) ) {
+			return $req;
+		}
+
+		if ( self::uses_background( $plugin->settings() ) ) {
+			return self::submit_background( $req );
+		}
+
+		self::mark_phase(
+			'calling',
+			array(
+				'mode'     => 'direct',
+				'provider' => $req['provider'],
+				'model'    => $req['model'],
+				'effort'   => $req['effort'],
+			)
+		);
+		$text = ( 'openai' === $req['provider'] )
+			? self::call_openai( $req['key'], $req['model'], $req['system'], $req['user'], $req['effort'] )
+			: self::call_anthropic( $req['key'], $req['model'], $req['system'], $req['user'], $req['effort'] );
+
+		if ( is_wp_error( $text ) ) {
+			return $text;
+		}
+		return self::store_proposal( $text, $req['provider'], $req['model'] );
+	}
+
+	/**
+	 * Everything a provider call needs: the provider-matched key, model,
+	 * effort and both prompts (the bundle is assembled here).
+	 *
+	 * @return array|WP_Error
+	 */
+	private static function prepare( OGM_GP_Dark_Mode $plugin ) {
 		$settings = $plugin->settings();
 		$provider = isset( $settings['ai_provider'] ) ? (string) $settings['ai_provider'] : 'anthropic';
 		$key      = $plugin->ai_key_for( $provider ); // Provider-matched — a key must never go to the other provider.
@@ -545,25 +782,54 @@ final class OGM_GPDM_AI {
 			return new WP_Error( 'ogm_gpdm_ai_no_key', __( 'No API key saved for this provider — add one under AI Assist and save the settings first.', 'gp-dark-mode' ) );
 		}
 
+		self::mark_phase( 'bundle' );
 		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-bundle.php';
 		$bundle = OGM_GPDM_Bundle::to_markdown( OGM_GPDM_Bundle::assemble( $plugin ) );
 
 		$instructions = get_option( self::INSTRUCTIONS_KEY, '' );
 		$instructions = is_string( $instructions ) ? $instructions : '';
 
-		$system = self::build_system_prompt();
-		$user   = self::build_user_prompt( $bundle, $instructions );
+		return array(
+			'provider' => $provider,
+			'key'      => $key,
+			'model'    => $model,
+			'effort'   => self::effort_for( $provider, $model, isset( $settings['ai_effort'] ) ? (string) $settings['ai_effort'] : '' ),
+			'system'   => self::build_system_prompt(),
+			'user'     => self::build_user_prompt( $bundle, $instructions ),
+		);
+	}
 
-		$effort = self::effort_for( $provider, $model, isset( $settings['ai_effort'] ) ? (string) $settings['ai_effort'] : '' );
-
-		$text = ( 'openai' === $provider )
-			? self::call_openai( $key, $model, $system, $user, $effort )
-			: self::call_anthropic( $key, $model, $system, $user, $effort );
-
-		if ( is_wp_error( $text ) ) {
-			return $text;
+	/**
+	 * Store CSS the site owner pasted — typically a reply from Claude using
+	 * Claude in Chrome — as a proposal, so it gets the same diff, Apply,
+	 * backup and Restore as a review. Accepts the whole reply (prose plus a
+	 * ```css block) or bare CSS.
+	 *
+	 * @return true|WP_Error
+	 */
+	public static function store_pasted_proposal( $text ) {
+		$text = (string) $text;
+		if ( '' === trim( $text ) ) {
+			return new WP_Error( 'ogm_gpdm_ai_paste_empty', __( 'Paste the reply (or the CSS) first.', 'gp-dark-mode' ) );
 		}
+		if ( false === strpos( $text, '```' ) && false !== strpos( $text, '{' ) && false === strpos( $text, 'data-theme' ) ) {
+			// Bare CSS without a fence: extract_css() wants a data-theme selector
+			// as proof it's dark-mode CSS, so wrap it rather than reject it.
+			$text = "```css\n" . $text . "\n```";
+		}
+		$stored = self::store_proposal( $text, __( 'Pasted', 'gp-dark-mode' ), __( 'Claude in Chrome', 'gp-dark-mode' ) );
+		if ( is_wp_error( $stored ) && 'ogm_gpdm_ai_no_css' === $stored->get_error_code() ) {
+			return new WP_Error( 'ogm_gpdm_ai_no_css', __( 'No CSS found in what you pasted — include the ```css block from the reply.', 'gp-dark-mode' ) );
+		}
+		return $stored;
+	}
 
+	/**
+	 * Turn the model's reply into the stored proposal.
+	 *
+	 * @return true|WP_Error
+	 */
+	private static function store_proposal( $text, $provider, $model ) {
 		$parsed = self::extract_css( $text );
 		if ( null === $parsed ) {
 			return new WP_Error(
@@ -718,35 +984,16 @@ final class OGM_GPDM_AI {
 
 	/** Call the Anthropic Messages API. Returns response text or WP_Error. */
 	private static function call_anthropic( $key, $model, $system, $user, $effort = null ) {
-		$budget = self::max_tokens( $effort, 'anthropic', $model );
-		$body   = array(
-			'model'      => $model,
-			'max_tokens' => $budget,
-			'system'     => $system,
-			'messages'   => array(
-				array(
-					'role'    => 'user',
-					'content' => $user,
-				),
-			),
-		);
-
-		$headers = array(
-			'content-type'      => 'application/json',
-			'x-api-key'         => $key,
-			'anthropic-version' => '2023-06-01',
-		);
+		$budget  = self::max_tokens( $effort, 'anthropic', $model );
+		$body    = self::anthropic_params( $model, $system, $user, $effort, $budget );
+		$headers = self::anthropic_headers( $key );
 
 		if ( self::is_effort_claude( $model ) ) {
 			// Server-side refusal fallbacks: if a safety classifier declines,
 			// the API retries a category-appropriate fallback model itself.
+			// Direct calls only — the Batches API rejects the parameter.
 			$headers['anthropic-beta'] = 'server-side-fallback-2026-07-01';
 			$body['fallbacks']         = 'default';
-
-			// Reasoning effort, resolved by effort_for() from the Effort setting.
-			if ( null !== $effort ) {
-				$body['output_config'] = array( 'effort' => $effort );
-			}
 		}
 
 		$res = wp_remote_post(
@@ -769,6 +1016,44 @@ final class OGM_GPDM_AI {
 			$msg = isset( $json['error']['message'] ) ? $json['error']['message'] : ( 'HTTP ' . $code );
 			return new WP_Error( 'ogm_gpdm_ai_http', 'Anthropic: ' . $msg );
 		}
+		return self::anthropic_message_text( $json, $budget, $effort );
+	}
+
+	/** Headers for every Anthropic API request. */
+	private static function anthropic_headers( $key ) {
+		return array(
+			'content-type'      => 'application/json',
+			'x-api-key'         => $key,
+			'anthropic-version' => '2023-06-01',
+		);
+	}
+
+	/** Messages API parameters, shared by the direct call and the batch request. */
+	private static function anthropic_params( $model, $system, $user, $effort, $budget ) {
+		$params = array(
+			'model'      => $model,
+			'max_tokens' => $budget,
+			'system'     => $system,
+			'messages'   => array(
+				array(
+					'role'    => 'user',
+					'content' => $user,
+				),
+			),
+		);
+		// Reasoning effort, resolved by effort_for() from the Effort setting.
+		if ( self::is_effort_claude( $model ) && null !== $effort ) {
+			$params['output_config'] = array( 'effort' => $effort );
+		}
+		return $params;
+	}
+
+	/**
+	 * The reply text of a Messages API message — from a direct call or a
+	 * batch result — or WP_Error for a refusal, a truncated reply or an
+	 * unexpected shape.
+	 */
+	private static function anthropic_message_text( $json, $budget, $effort ) {
 		// Refusal stop reason first — a refusal can carry empty content, so it
 		// must not be misreported as a malformed response.
 		if ( is_array( $json ) && isset( $json['stop_reason'] ) && 'refusal' === $json['stop_reason'] ) {
@@ -846,6 +1131,358 @@ final class OGM_GPDM_AI {
 		}
 
 		return (string) $json['choices'][0]['message']['content'];
+	}
+
+	/* ---------------------------------------------------------------------
+	 * Background jobs (1.9.0)
+	 * ------------------------------------------------------------------- */
+
+	/**
+	 * Hand the review to the provider as a background job and record it in
+	 * the status: an Anthropic message batch of one request, or an OpenAI
+	 * background response. Returns 'submitted' or WP_Error.
+	 */
+	private static function submit_background( array $req ) {
+		$budget = self::max_tokens( $req['effort'], $req['provider'], $req['model'] );
+
+		if ( 'openai' === $req['provider'] ) {
+			$body = array(
+				'model'             => $req['model'],
+				'instructions'      => $req['system'],
+				'input'             => array(
+					array(
+						'role'    => 'user',
+						'content' => $req['user'],
+					),
+				),
+				'background'        => true,
+				// Kept until the plugin fetches the result, then deleted
+				// (forget_job()); without store a background response can be
+				// purged ~10 minutes in, before a long review finishes.
+				'store'             => true,
+				'max_output_tokens' => $budget,
+			);
+			if ( null !== $req['effort'] ) {
+				$body['reasoning'] = array( 'effort' => $req['effort'] );
+			}
+			$url     = self::OPENAI_RESPONSES_URL;
+			$headers = self::openai_headers( $req['key'] );
+			$label   = 'OpenAI';
+		} else {
+			$body    = array(
+				'requests' => array(
+					array(
+						'custom_id' => self::BATCH_CUSTOM_ID,
+						'params'    => self::anthropic_params( $req['model'], $req['system'], $req['user'], $req['effort'], $budget ),
+					),
+				),
+			);
+			$url     = self::ANTHROPIC_BATCH_URL;
+			$headers = self::anthropic_headers( $req['key'] );
+			$label   = 'Anthropic';
+		}
+
+		$res = wp_remote_post(
+			$url,
+			array(
+				'timeout' => 30,
+				'headers' => $headers,
+				'body'    => wp_json_encode( $body ),
+			)
+		);
+		if ( is_wp_error( $res ) ) {
+			return new WP_Error( 'ogm_gpdm_ai_transport', $label . ': ' . $res->get_error_message() );
+		}
+		$code = (int) wp_remote_retrieve_response_code( $res );
+		$json = json_decode( wp_remote_retrieve_body( $res ), true );
+		if ( $code < 200 || $code >= 300 ) {
+			$msg = isset( $json['error']['message'] ) ? $json['error']['message'] : ( 'HTTP ' . $code );
+			return new WP_Error( 'ogm_gpdm_ai_http', $label . ': ' . $msg );
+		}
+		if ( ! is_array( $json ) || empty( $json['id'] ) || ! is_string( $json['id'] ) ) {
+			/* translators: %s: provider name. */
+			return new WP_Error( 'ogm_gpdm_ai_shape', sprintf( __( '%s accepted the review but returned no job id.', 'gp-dark-mode' ), $label ) );
+		}
+
+		self::patch_status(
+			array(
+				'mode'     => 'background',
+				'phase'    => 'submitted',
+				'phase_at' => time(),
+				'provider' => $req['provider'],
+				'model'    => $req['model'],
+				'effort'   => $req['effort'],
+				'checked'  => time(),
+				'job'      => array(
+					'id'     => $json['id'],
+					'budget' => $budget,
+				),
+				'message'  => self::background_note( $req['provider'] ),
+			)
+		);
+		return 'submitted';
+	}
+
+	/** What the page says while a background job runs. */
+	public static function background_note( $provider ) {
+		return 'openai' === $provider
+			? __( 'Running in OpenAI’s background mode — usually a few minutes. You can leave this page; the proposal will be waiting here.', 'gp-dark-mode' )
+			: __( 'Queued in Anthropic’s batch service at half the usual price — usually a few minutes, occasionally up to an hour. You can leave this page; the proposal will be waiting here.', 'gp-dark-mode' );
+	}
+
+	/** Headers for every OpenAI API request. */
+	private static function openai_headers( $key ) {
+		return array(
+			'content-type'  => 'application/json',
+			'authorization' => 'Bearer ' . $key,
+		);
+	}
+
+	/**
+	 * Ask the provider about the running background job, and finish the run
+	 * when it has an outcome: store the proposal (or the error), then delete
+	 * the job's copy at the provider. Called by the page's status poll and by
+	 * the CHECK_HOOK cron event; throttled to one provider call per
+	 * CHECK_INTERVAL unless $force. A transient failure (network, 429, 5xx)
+	 * leaves the job running for the next check.
+	 */
+	public static function check_job( OGM_GP_Dark_Mode $plugin, $force = false ) {
+		$status = self::status();
+		if ( null === $status || 'running' !== $status['state'] || ! self::is_background_status( $status ) || empty( $status['job']['id'] ) ) {
+			return;
+		}
+		$now = time();
+		if ( ! $force && isset( $status['checked'] ) && $now - (int) $status['checked'] < self::CHECK_INTERVAL ) {
+			return;
+		}
+		self::patch_status( array( 'checked' => $now ) );
+
+		$provider = isset( $status['provider'] ) && 'openai' === $status['provider'] ? 'openai' : 'anthropic';
+		$key      = $plugin->ai_key_for( $provider );
+		if ( '' === $key ) {
+			self::set_status( 'error', __( 'The API key was removed while the review was running, so its result can’t be collected. Save the key and run the review again.', 'gp-dark-mode' ) );
+			return;
+		}
+
+		$job    = $status['job'];
+		$effort = isset( $status['effort'] ) ? $status['effort'] : null;
+		$budget = isset( $job['budget'] ) ? (int) $job['budget'] : self::max_tokens( $effort );
+		$poll   = ( 'openai' === $provider )
+			? self::poll_openai( $key, (string) $job['id'], $budget, $effort )
+			: self::poll_anthropic( $key, (string) $job['id'], $budget, $effort );
+
+		if ( 'running' === $poll['state'] ) {
+			return;
+		}
+		if ( 'retry' === $poll['state'] ) {
+			self::patch_status( array( 'message' => self::background_note( $provider ) . ' ' . $poll['note'] ) );
+			return;
+		}
+
+		$outcome = ( 'done' === $poll['state'] )
+			? self::store_proposal( $poll['text'], $provider, isset( $status['model'] ) ? (string) $status['model'] : '' )
+			: $poll['error'];
+		if ( is_wp_error( $outcome ) ) {
+			self::set_status( 'error', $outcome->get_error_message() );
+		} else {
+			self::set_status( 'done', __( 'Review complete — a proposal is ready.', 'gp-dark-mode' ) );
+		}
+		self::forget_job( $provider, $key, (string) $job['id'] );
+	}
+
+	/** A 'retry' poll result: the check failed in a way the next one may not. */
+	private static function poll_retry( $label, $detail ) {
+		return array(
+			'state' => 'retry',
+			/* translators: 1: provider name, 2: error detail. */
+			'note'  => sprintf( __( '(The last check with %1$s failed — %2$s — the next one retries.)', 'gp-dark-mode' ), $label, $detail ),
+		);
+	}
+
+	/**
+	 * Poll an Anthropic message batch.
+	 *
+	 * @return array{state:string,text?:string,error?:WP_Error,note?:string}
+	 */
+	private static function poll_anthropic( $key, $id, $budget, $effort ) {
+		$res = wp_remote_get( self::ANTHROPIC_BATCH_URL . '/' . rawurlencode( $id ), array( 'timeout' => 20, 'headers' => self::anthropic_headers( $key ) ) );
+		$got = self::poll_response( $res, 'Anthropic' );
+		if ( isset( $got['state'] ) ) {
+			return $got;
+		}
+		$batch = $got['json'];
+		if ( ! isset( $batch['processing_status'] ) || 'ended' !== $batch['processing_status'] ) {
+			return array( 'state' => 'running' );
+		}
+		if ( empty( $batch['results_url'] ) || ! is_string( $batch['results_url'] ) ) {
+			return self::poll_retry( 'Anthropic', __( 'the batch ended but its results aren’t available yet', 'gp-dark-mode' ) );
+		}
+
+		$res = wp_remote_get( $batch['results_url'], array( 'timeout' => 30, 'headers' => self::anthropic_headers( $key ) ) );
+		if ( is_wp_error( $res ) ) {
+			return self::poll_retry( 'Anthropic', $res->get_error_message() );
+		}
+		$code = (int) wp_remote_retrieve_response_code( $res );
+		if ( 200 !== $code ) {
+			return self::poll_retry( 'Anthropic', 'HTTP ' . $code );
+		}
+
+		$result = null;
+		foreach ( preg_split( '/\r\n|\r|\n/', (string) wp_remote_retrieve_body( $res ) ) as $line ) {
+			$row = json_decode( trim( $line ), true );
+			if ( is_array( $row ) && isset( $row['custom_id'], $row['result'] ) && self::BATCH_CUSTOM_ID === $row['custom_id'] ) {
+				$result = $row['result'];
+				break;
+			}
+		}
+		$type = is_array( $result ) && isset( $result['type'] ) ? $result['type'] : '';
+
+		if ( 'succeeded' === $type ) {
+			$text = self::anthropic_message_text( isset( $result['message'] ) ? $result['message'] : null, $budget, $effort );
+			return is_wp_error( $text ) ? array( 'state' => 'error', 'error' => $text ) : array( 'state' => 'done', 'text' => $text );
+		}
+		if ( 'errored' === $type ) {
+			$msg = isset( $result['error']['error']['message'] ) ? $result['error']['error']['message'] : ( isset( $result['error']['message'] ) ? $result['error']['message'] : __( 'the request failed', 'gp-dark-mode' ) );
+			return array( 'state' => 'error', 'error' => new WP_Error( 'ogm_gpdm_ai_http', 'Anthropic: ' . $msg ) );
+		}
+		if ( 'expired' === $type ) {
+			return array( 'state' => 'error', 'error' => new WP_Error( 'ogm_gpdm_ai_expired', __( 'Anthropic’s batch service didn’t get to the review within 24 hours, so it expired unbilled. Run it again.', 'gp-dark-mode' ) ) );
+		}
+		if ( 'canceled' === $type ) {
+			return array( 'state' => 'error', 'error' => new WP_Error( 'ogm_gpdm_ai_canceled', __( 'Review canceled.', 'gp-dark-mode' ) ) );
+		}
+		return array( 'state' => 'error', 'error' => new WP_Error( 'ogm_gpdm_ai_shape', __( 'Anthropic’s batch ended without a result for the review.', 'gp-dark-mode' ) ) );
+	}
+
+	/**
+	 * Poll an OpenAI background response.
+	 *
+	 * @return array{state:string,text?:string,error?:WP_Error,note?:string}
+	 */
+	private static function poll_openai( $key, $id, $budget, $effort ) {
+		$res = wp_remote_get( self::OPENAI_RESPONSES_URL . '/' . rawurlencode( $id ), array( 'timeout' => 20, 'headers' => self::openai_headers( $key ) ) );
+		$got = self::poll_response( $res, 'OpenAI' );
+		if ( isset( $got['state'] ) ) {
+			return $got;
+		}
+		$json   = $got['json'];
+		$status = isset( $json['status'] ) ? (string) $json['status'] : '';
+
+		if ( in_array( $status, array( 'queued', 'in_progress', '' ), true ) ) {
+			return array( 'state' => 'running' );
+		}
+		if ( 'incomplete' === $status ) {
+			$reason = isset( $json['incomplete_details']['reason'] ) ? (string) $json['incomplete_details']['reason'] : '';
+			if ( 'max_output_tokens' === $reason ) {
+				return array( 'state' => 'error', 'error' => self::truncated_error( $budget, $effort ) );
+			}
+			/* translators: %s: the reason OpenAI gave. */
+			return array( 'state' => 'error', 'error' => new WP_Error( 'ogm_gpdm_ai_incomplete', sprintf( __( 'OpenAI stopped the review before it finished (%s), so nothing was stored.', 'gp-dark-mode' ), '' !== $reason ? $reason : 'incomplete' ) ) );
+		}
+		if ( 'failed' === $status ) {
+			$msg = isset( $json['error']['message'] ) ? $json['error']['message'] : __( 'the review failed', 'gp-dark-mode' );
+			return array( 'state' => 'error', 'error' => new WP_Error( 'ogm_gpdm_ai_http', 'OpenAI: ' . $msg ) );
+		}
+		if ( 'cancelled' === $status || 'canceled' === $status ) {
+			return array( 'state' => 'error', 'error' => new WP_Error( 'ogm_gpdm_ai_canceled', __( 'Review canceled.', 'gp-dark-mode' ) ) );
+		}
+		if ( 'completed' !== $status ) {
+			return array( 'state' => 'running' ); // A status this code doesn't know yet.
+		}
+
+		$text    = '';
+		$refusal = '';
+		foreach ( isset( $json['output'] ) && is_array( $json['output'] ) ? $json['output'] : array() as $item ) {
+			if ( ! isset( $item['type'] ) || 'message' !== $item['type'] || empty( $item['content'] ) || ! is_array( $item['content'] ) ) {
+				continue;
+			}
+			foreach ( $item['content'] as $part ) {
+				if ( isset( $part['type'], $part['text'] ) && 'output_text' === $part['type'] ) {
+					$text .= $part['text'];
+				} elseif ( isset( $part['type'] ) && 'refusal' === $part['type'] ) {
+					$refusal .= isset( $part['refusal'] ) ? $part['refusal'] : '';
+				}
+			}
+		}
+		if ( '' === $text && '' !== $refusal ) {
+			return array( 'state' => 'error', 'error' => new WP_Error( 'ogm_gpdm_ai_refusal', trim( 'OpenAI declined the request. ' . $refusal ) ) );
+		}
+		if ( '' === $text ) {
+			return array( 'state' => 'error', 'error' => new WP_Error( 'ogm_gpdm_ai_shape', __( 'Unexpected OpenAI response shape.', 'gp-dark-mode' ) ) );
+		}
+		return array( 'state' => 'done', 'text' => $text );
+	}
+
+	/**
+	 * Shared handling of a job-status GET: ['json' => …] on 200, a retry for
+	 * transient failures (network, 408/409/429, 5xx), an error otherwise
+	 * (the job is gone, or the key no longer works).
+	 */
+	private static function poll_response( $res, $label ) {
+		if ( is_wp_error( $res ) ) {
+			return self::poll_retry( $label, $res->get_error_message() );
+		}
+		$code = (int) wp_remote_retrieve_response_code( $res );
+		$json = json_decode( wp_remote_retrieve_body( $res ), true );
+		if ( 200 === $code && is_array( $json ) ) {
+			return array( 'json' => $json );
+		}
+		if ( in_array( $code, array( 0, 200, 408, 409, 429 ), true ) || $code >= 500 ) {
+			return self::poll_retry( $label, 'HTTP ' . $code );
+		}
+		$msg = isset( $json['error']['message'] ) ? $json['error']['message'] : ( 'HTTP ' . $code );
+		return array( 'state' => 'error', 'error' => new WP_Error( 'ogm_gpdm_ai_http', $label . ': ' . $msg ) );
+	}
+
+	/**
+	 * Delete the job's copy at the provider once its result is in (or it
+	 * failed): the request held the whole AI Context Bundle. Best effort —
+	 * a failed delete leaves it to the provider's own retention.
+	 */
+	private static function forget_job( $provider, $key, $id ) {
+		if ( ! function_exists( 'wp_remote_request' ) ) {
+			return;
+		}
+		$url = ( 'openai' === $provider ? self::OPENAI_RESPONSES_URL : self::ANTHROPIC_BATCH_URL ) . '/' . rawurlencode( $id );
+		wp_remote_request(
+			$url,
+			array(
+				'method'  => 'DELETE',
+				'timeout' => 10,
+				'headers' => 'openai' === $provider ? self::openai_headers( $key ) : self::anthropic_headers( $key ),
+			)
+		);
+	}
+
+	/**
+	 * Cancel the running background job (best effort at the provider) and
+	 * close the run. A direct call can't be stopped once it's in flight.
+	 *
+	 * @return true|WP_Error
+	 */
+	public static function cancel_job( OGM_GP_Dark_Mode $plugin ) {
+		$status = self::status();
+		if ( null === $status || 'running' !== $status['state'] ) {
+			return new WP_Error( 'ogm_gpdm_ai_not_running', __( 'No review is running.', 'gp-dark-mode' ) );
+		}
+		if ( ! self::is_background_status( $status ) || empty( $status['job']['id'] ) ) {
+			return new WP_Error( 'ogm_gpdm_ai_not_cancelable', __( 'This review is a direct call to the model and can’t be stopped — it ends on its own within the time limit for its Effort setting.', 'gp-dark-mode' ) );
+		}
+		$provider = isset( $status['provider'] ) && 'openai' === $status['provider'] ? 'openai' : 'anthropic';
+		$key      = $plugin->ai_key_for( $provider );
+		if ( '' !== $key ) {
+			$url = ( 'openai' === $provider ? self::OPENAI_RESPONSES_URL : self::ANTHROPIC_BATCH_URL ) . '/' . rawurlencode( (string) $status['job']['id'] ) . '/cancel';
+			wp_remote_post(
+				$url,
+				array(
+					'timeout' => 15,
+					'headers' => 'openai' === $provider ? self::openai_headers( $key ) : self::anthropic_headers( $key ),
+					'body'    => '{}',
+				)
+			);
+		}
+		self::set_status( 'error', __( 'Review canceled.', 'gp-dark-mode' ) );
+		return true;
 	}
 
 	/* ---------------------------------------------------------------------

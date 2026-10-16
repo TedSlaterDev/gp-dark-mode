@@ -91,7 +91,11 @@ check( 'site-overrides: reduced substantially', strlen( $realOut ) < strlen( $re
 // The nav rule moved to the gp-chrome module in the 1.2.0 layer split.
 $chrome    = file_get_contents( dirname( __DIR__ ) . '/assets/css/modules/gp-chrome.css' );
 $chromeOut = OGM_GPDM_Bundle::extract_color_css( $chrome );
-check( 'gp-chrome module: nav rule kept', false !== strpos( $chromeOut, 'html[data-theme="dark"] .main-navigation' ) && false !== strpos( $chromeOut, 'background-color: var(--accent)' ) );
+check( 'gp-chrome module: nav rule kept', false !== strpos( $chromeOut, 'html[data-theme="dark"] .main-navigation' ) );
+// 1.11.0: the simplified menu — no rules above/below the bar, no default
+// accent fill; the accent look is the opt-in "Dark nav accent" setting.
+check( 'gp-chrome module: menu has no borders and no default accent fill', false === strpos( $chrome, 'border-top' ) && false === strpos( $chrome, 'border-bottom' ) && false === strpos( $chrome, 'var(--accent)' ) );
+check( 'gp-chrome module: accent menu still one setting away', (bool) preg_match( '~html\.gpdm-accent-nav\[data-theme="dark"\] \.main-navigation,.*?background-color: var\(--dm-accent\)~s', $chrome ) );
 echo 'site-overrides: ' . strlen( $real ) . ' bytes -> ' . strlen( $realOut ) . " bytes\n";
 
 // Adhesion units (Ad Inserter inline position:fixed / ai-close) render on
@@ -484,6 +488,35 @@ foreach ( array( null, 'low', 'medium', 'high', 'xhigh', 'max' ) as $e ) {
 check( 'max_tokens: every allowance can be spent inside its timeout', $fits );
 
 $prov = OGM_GPDM_AI::providers();
+// ---- 1.11.0: GeneratePress's own light surfaces, darkened per site ----
+$gp_colors = array(
+	array( 'slug' => 'contrast', 'color' => '#222222' ), array( 'slug' => 'contrast-2', 'color' => '#575760' ),
+	array( 'slug' => 'contrast-3', 'color' => '#b2b2be' ), array( 'slug' => 'base', 'color' => '#f0f0f0' ),
+	array( 'slug' => 'base-2', 'color' => '#f7f8f9' ), array( 'slug' => 'base-3', 'color' => '#ffffff' ),
+	array( 'slug' => 'accent', 'color' => '#1e73be' ),
+);
+$gp_defaults = array(
+	'top_bar_background_color' => '#636363', 'header_background_color' => 'var(--base-3)', 'navigation_background_color' => 'var(--base-3)',
+	'subnavigation_background_color' => 'var(--base)', 'content_background_color' => 'var(--base-3)', 'sidebar_widget_background_color' => 'var(--base-3)',
+	'footer_widget_background_color' => 'var(--base-3)', 'footer_background_color' => 'var(--base-3)', 'search_modal_bg_color' => 'var(--base-3)',
+);
+$vanilla = OGM_GPDM_Palette::gp_surfaces_css( $gp_defaults, $gp_colors );
+check( 'gp surfaces: vanilla GP darkens header, menu, content, comments, footer widgets, footer bar', false !== strpos( $vanilla, 'html[data-theme="dark"] .site-header' ) && false !== strpos( $vanilla, 'html[data-theme="dark"] .main-navigation,' ) && false !== strpos( $vanilla, 'html[data-theme="dark"] .separate-containers .comments-area' ) && false !== strpos( $vanilla, 'html[data-theme="dark"] .footer-widgets' ) && false !== strpos( $vanilla, 'html[data-theme="dark"] .site-info' ) );
+check( 'gp surfaces: dropdowns get the alternate surface', (bool) preg_match( '~\.main-navigation ul ul \{\s*background-color: var\(--surface-2\)~', $vanilla ) );
+check( 'gp surfaces: text set light wherever a surface is darkened', substr_count( $vanilla, 'color: var(--text);' ) >= 6 );
+check( 'gp surfaces: the dark default top bar (#636363) is left alone', false === strpos( $vanilla, '.top-bar' ) );
+check( 'gp surfaces: search modal variables darkened', false !== strpos( $vanilla, '--gp-search-modal-bg-color: var(--surface)' ) && false !== strpos( $vanilla, '--gp-search-modal-text-color: var(--text)' ) );
+check( 'gp surfaces: every selector scoped to dark mode', 0 === preg_match( '~(^|,)\s*\.[a-z]~m', preg_replace( '~/\*.*?\*/~s', '', $vanilla ) ) );
+$brand = OGM_GPDM_Palette::gp_surfaces_css( array_merge( $gp_defaults, array( 'header_background_color' => '#0b2545', 'navigation_background_color' => 'var(--accent)', 'footer_background_color' => '#fafafa' ) ), $gp_colors );
+check( 'gp surfaces: a dark brand header and an accent menu are left alone', false === strpos( $brand, '.site-header' ) && false === strpos( $brand, 'html[data-theme="dark"] .main-navigation,' ) );
+check( 'gp surfaces: a literal light hex is still darkened', false !== strpos( $brand, '.site-info' ) );
+$pal = OGM_GPDM_Palette::gp_surfaces_css( $gp_defaults, $gp_colors, array( 'base-3', 'BASE' ) );
+check( 'gp surfaces: slugs the generated palette remaps are left to it', '' === $pal );
+$odd = OGM_GPDM_Palette::gp_surfaces_css( array( 'header_background_color' => 'linear-gradient(#fff,#eee)', 'footer_background_color' => 'var(--nope)', 'footer_widget_background_color' => 'var(--base-3, #fff)', 'content_background_color' => '' ), $gp_colors );
+check( 'gp surfaces: gradients, unknown slugs and empty values skipped; var() fallbacks resolved', false === strpos( $odd, '.site-header' ) && false === strpos( $odd, '.site-info' ) && false !== strpos( $odd, '.footer-widgets' ) && false === strpos( $odd, 'inside-article' ) );
+check( 'gp surfaces: no settings → nothing', '' === OGM_GPDM_Palette::gp_surfaces_css( array(), $gp_colors ) );
+check( 'palette slugs: parsed from generated CSS', array( 'base-3', 'contrast', 'bg-2' ) === OGM_GPDM_Palette::palette_slugs( "html[data-theme=\"dark\"] {\n --base-3: #121212;\n --contrast: #eee;\n --bg-2:#111; color: var(--base);\n}" ) );
+
 check( 'seed models: current lineups, defaults lead each list', 'claude-opus-5-5' === OGM_GPDM_AI::seed_models( 'anthropic' )[0] && 'gpt-6.1-sol' === OGM_GPDM_AI::seed_models( 'openai' )[0] && $prov['anthropic']['default_model'] === OGM_GPDM_AI::seed_models( 'anthropic' )[0] && $prov['openai']['default_model'] === OGM_GPDM_AI::seed_models( 'openai' )[0] );
 check( 'seed models: OpenAI seed is already in ranked order (refresh keeps the default on top)', OGM_GPDM_AI::seed_models( 'openai' ) === OGM_GPDM_AI::rank_openai_models( OGM_GPDM_AI::seed_models( 'openai' ) ) );
 check( 'seed models: every Claude seed takes effort', null !== OGM_GPDM_AI::effort_for( 'anthropic', 'claude-fable-5-1', '' ) && null !== OGM_GPDM_AI::effort_for( 'anthropic', 'claude-sonnet-5-5', '' ) && null !== OGM_GPDM_AI::effort_for( 'anthropic', 'claude-haiku-5-5', '' ) );

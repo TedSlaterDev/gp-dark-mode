@@ -16,6 +16,12 @@
  * 4. Emulate :hover / :focus by copying each same-origin rule that uses them
  *    into a class-based twin placed right after it (same specificity, same
  *    source order), then adding that class to the element and its ancestors.
+ * 5. Form-field borders (1.13.0, WCAG 1.4.11): a text field, select or
+ *    textarea with a visible border needs that border at 3:1 against the
+ *    field's own background AND the background around it, at rest and on
+ *    focus. A field whose fill already stands out 3:1 from its surroundings
+ *    is identified by the fill and isn't flagged. Fields with no border
+ *    aren't measured.
  *
  * Exposes window.OGM_GPDM_AUDIT.run( pages, onProgress ) → Promise<result>.
  * No dependencies; plain ES5 so it runs anywhere the settings page does.
@@ -31,6 +37,13 @@
 	var MAX_ROWS     = 60;    // Failures kept per page.
 	var MAX_ISLANDS  = 20;
 	var ISLAND_AREA  = 12000; // px² — about 200×60.
+	var MAX_FIELDS   = 300;   // Form fields measured per page.
+	var MAX_FIELD_ROWS = 30;  // Field-border failures kept per page.
+	var FIELD_NEED   = 3;     // WCAG 1.4.11 non-text contrast.
+
+	// Fields whose border identifies the control. Buttons, checkboxes, radios
+	// and native pickers (range, color, file) are out.
+	var FIELD_SELECTOR = 'input:not([type="hidden"]):not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]):not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]), select, textarea';
 
 	/* ---------- color math ---------- */
 
@@ -334,6 +347,101 @@
 		};
 	}
 
+	/* ---------- form-field borders (1.13.0) ---------- */
+
+	function fieldElements( doc ) {
+		var list = doc.querySelectorAll( FIELD_SELECTOR );
+		var out  = [];
+		for ( var i = 0; i < list.length && out.length < MAX_FIELDS; i++ ) {
+			if ( ! list[ i ].closest( '.dm-toggle, #wpadminbar' ) ) {
+				out.push( list[ i ] );
+			}
+		}
+		return out;
+	}
+
+	/** What a field is for, for the report: placeholder, label or name, never its value. */
+	function fieldSample( el ) {
+		var t = el.getAttribute( 'placeholder' ) || el.getAttribute( 'aria-label' ) || el.getAttribute( 'name' ) || el.tagName.toLowerCase();
+		return String( t ).replace( /\s+/g, ' ' ).trim().slice( 0, 60 );
+	}
+
+	/**
+	 * One field's border: the best-contrasting visible side, composited over
+	 * what shows through it, measured against the field's own background and
+	 * the background around the field. {ratio (the lower of the two),
+	 * ratio_field, ratio_bg, fill, border, field, bg, overImage}, or null when
+	 * the field is invisible or has no visible border. `fill` is the field
+	 * background against its surroundings.
+	 */
+	function measureField( el, win, doc ) {
+		if ( ! isVisible( el, win ) ) {
+			return null;
+		}
+		var cs     = win.getComputedStyle( el );
+		var around = el.parentElement ? backgroundOf( el.parentElement, win, doc ) : { color: canvasColor( win, doc ), overImage: false };
+		var field  = backgroundOf( el, win, doc );
+		// With the default background-clip (border-box), the field's own
+		// background shows through a translucent border; otherwise what's
+		// around the field does.
+		var under = ( cs.backgroundClip || 'border-box' ).indexOf( 'border-box' ) > -1 ? field.color : around.color;
+		var sides = [ 'Top', 'Right', 'Bottom', 'Left' ];
+		var best  = null;
+		for ( var i = 0; i < sides.length; i++ ) {
+			var width = parseFloat( cs[ 'border' + sides[ i ] + 'Width' ] ) || 0;
+			var style = cs[ 'border' + sides[ i ] + 'Style' ];
+			var color = parseColor( cs[ 'border' + sides[ i ] + 'Color' ] );
+			if ( width < 0.5 || style === 'none' || style === 'hidden' || color.a === 0 ) {
+				continue;
+			}
+			var eff = over( color, under );
+			var rf  = contrast( eff, field.color );
+			var rb  = contrast( eff, around.color );
+			if ( ! best || Math.min( rf, rb ) > best.ratio ) {
+				best = { ratio: Math.min( rf, rb ), ratio_field: rf, ratio_bg: rb, border: hex( eff ) };
+			}
+		}
+		if ( ! best ) {
+			return null;
+		}
+		best.fill      = contrast( field.color, around.color );
+		best.field     = hex( field.color );
+		best.bg        = hex( around.color );
+		best.overImage = field.overImage || around.overImage;
+		return best;
+	}
+
+	/** A measured field fails when neither its border nor its fill makes its edge 3:1. */
+	function fieldFails( m ) {
+		return m.ratio + 0.005 < FIELD_NEED && m.fill + 0.005 < FIELD_NEED;
+	}
+
+	function recordField( rows, el, m, state, alsoLight ) {
+		var sel = selectorFor( el );
+		var key = sel + '|' + m.border + '|' + m.field + '|' + m.bg + '|' + state;
+		for ( var i = 0; i < rows.length; i++ ) {
+			if ( rows[ i ].key === key ) {
+				rows[ i ].count++;
+				return;
+			}
+		}
+		rows.push( {
+			key: key,
+			selector: sel,
+			sample: fieldSample( el ),
+			border: m.border,
+			field: m.field,
+			bg: m.bg,
+			ratio: Math.round( m.ratio * 100 ) / 100,
+			ratio_field: Math.round( m.ratio_field * 100 ) / 100,
+			ratio_bg: Math.round( m.ratio_bg * 100 ) / 100,
+			count: 1,
+			state: state,
+			also_light: !! alsoLight,
+			over_image: !! m.overImage
+		} );
+	}
+
 	/* ---------- hover / focus emulation ---------- */
 
 	var STATE_RE = /:(hover|focus-visible|focus-within|focus)(?![\w-])/g;
@@ -440,6 +548,7 @@
 		var doc  = frame.contentDocument;
 		var root = doc.documentElement;
 		var texts = textElements( doc );
+		var fields = fieldElements( doc );
 
 		// Light mode first: which elements already fail there (the site's own design)?
 		root.setAttribute( 'data-theme', 'light' );
@@ -449,6 +558,14 @@
 			if ( lm && lm.ratio + 0.005 < lm.need ) {
 				texts[ i ].__gpdmLightFail = true;
 				lightTotal++;
+			}
+		}
+		var fieldLightTotal = 0;
+		for ( var fl = 0; fl < fields.length; fl++ ) {
+			var flm = measureField( fields[ fl ], win, doc );
+			if ( flm && fieldFails( flm ) ) {
+				fields[ fl ].__gpdmFieldLightFail = true;
+				fieldLightTotal++;
 			}
 		}
 
@@ -465,6 +582,23 @@
 			if ( dm.ratio + 0.005 < dm.need ) {
 				darkTotal++;
 				record( rows, texts[ j ], dm, 'normal', texts[ j ].__gpdmLightFail );
+			}
+		}
+
+		// Form-field borders in dark mode, at rest (focus comes with the other states below).
+		var fieldRows     = [];
+		var fieldTotal    = 0;
+		var fieldsChecked = 0;
+		for ( var fd = 0; fd < fields.length; fd++ ) {
+			var fdm = measureField( fields[ fd ], win, doc );
+			fields[ fd ].__gpdmFieldRest = fdm;
+			if ( ! fdm ) {
+				continue;
+			}
+			fieldsChecked++;
+			if ( fieldFails( fdm ) ) {
+				fieldTotal++;
+				recordField( fieldRows, fields[ fd ], fdm, 'normal', fields[ fd ].__gpdmFieldLightFail );
 			}
 		}
 
@@ -523,7 +657,25 @@
 			}
 		}
 
+		// Focused fields: reported only when focus changes what was measured at rest.
+		for ( var ff = 0; twins && ff < fields.length; ff++ ) {
+			var rest = fields[ ff ].__gpdmFieldRest;
+			if ( ! rest ) {
+				continue;
+			}
+			setState( fields[ ff ], 'focus', true );
+			var ffm = measureField( fields[ ff ], win, doc );
+			setState( fields[ ff ], 'focus', false );
+			if ( ffm && fieldFails( ffm ) && ( ffm.border !== rest.border || ffm.field !== rest.field ) ) {
+				fieldTotal++;
+				recordField( fieldRows, fields[ ff ], ffm, 'focus', false );
+			}
+		}
+
 		rows.sort( function ( a, c ) {
+			return a.ratio - c.ratio;
+		} );
+		fieldRows.sort( function ( a, c ) {
 			return a.ratio - c.ratio;
 		} );
 		return {
@@ -535,7 +687,14 @@
 			dark_total: darkTotal,
 			light_total: lightTotal,
 			island_total: islandTotal,
+			fields_checked: fieldsChecked,
+			field_total: fieldTotal,
+			field_light_total: fieldLightTotal,
 			failures: rows.slice( 0, MAX_ROWS ).map( function ( row ) {
+				delete row.key;
+				return row;
+			} ),
+			fields: fieldRows.slice( 0, MAX_FIELD_ROWS ).map( function ( row ) {
 				delete row.key;
 				return row;
 			} ),

@@ -4,7 +4,7 @@ Tags: dark mode, generatepress, dark theme, toggle, color scheme
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.12.0
+Stable tag: 1.13.1
 License: GPL-2.0-or-later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -62,7 +62,7 @@ Some hosts — WP Engine among them — end any request after about a minute, an
 A Site Header Block Element (for example one holding a GenerateBlocks Navigation block) replaces GeneratePress's header, so there is no menu bar for the automatic toggle to join. Add the Dark Mode Toggle block to the header element where you want the switch. The settings page points this out when it finds a Site Header Block Element.
 
 = How do I change the colors? =
-Click "Generate from Global Colors" on the Generated tab, review, and enable it: dark values are derived from your GeneratePress Global Colors, and the toggle, dark-mode links and alternate surfaces from your accent color. To change any color by hand, redefine its CSS variable in the Manual CSS tab (for example `html[data-theme="dark"] { --link: #8fd; }`). The Manual CSS loads last and is never overwritten.
+Click "Generate from Global Colors" on the Generated tab, review, and enable it: dark values are derived from your GeneratePress Global Colors, and the toggle, dark-mode links and alternate surfaces from your accent color. To change any color by hand, redefine its CSS variable in the Manual CSS tab (for example `html[data-theme="dark"] { --link: #8fd; }`). Form-field borders have their own variable, `--field-border`; keep it at 3:1 or more against the field and the page. The Manual CSS loads last and is never overwritten.
 
 = How do I edit the site-specific tweaks? =
 Use the **Additional CSS** editor on the settings page (Settings → GP Dark Mode). It starts empty and only you write to it — the home for per-placement ad selectors and one-off page chrome. Toggle it off there to run without your overrides.
@@ -108,6 +108,26 @@ party. The contrast check loads your own pages in your browser, with
 scripts off; it contacts no third party either.
 
 == Changelog ==
+
+= 1.13.1 =
+* Fixed: with the generated palette on, form fields outside the main content area had borders that were hard to see in dark mode. These are fields in the header, top bar, footer and off-canvas widget areas, page heroes and hook elements, such as a search box or a newsletter sign-up. GeneratePress draws those borders in its Base color, which the generated palette turns into a dark surface: 1.16:1 against the field on GeneratePress's default colors. They now use `--field-border` like fields in the content area: on GeneratePress's default colors, that's 6.09:1 against the field and 6.73:1 against the area around it. Text inputs there keep GeneratePress's focus color. Without the generated palette, those fields stay light as before, and only their border changes, from near-white to grey. The navigation search and the search pop-up have no border and look the same as before. On other themes, fields anywhere on the page now get this border in dark mode, unless the theme's own field styles are more specific.
+* Tests: the browser test now loads the plugin's stylesheet on a page built like a GeneratePress site, with fields in the header, content and footer.
+
+= 1.13.0 =
+* New: the contrast check now measures form-field borders. It lists text fields, text areas and dropdowns whose border is under 3:1 in dark mode, against the field or against the background around it. WCAG 2.2 (success criterion 1.4.11, Non-text Contrast) asks for 3:1, because the border is what shows where the field is. Fields are checked as they are and when focused. Each failure shows both ratios and the colors, worst first, and is marked when it fails in light mode too. A field whose fill already stands out from the page passes. Fields without a border, buttons, checkboxes and radio buttons aren't measured.
+* New: the AI tab's results have a Field borders column and a list of failing fields, each with a swatch showing the field, its border and the color around it.
+* New: an AI review and the Claude in Chrome prompt now get the field-border failures too. They're asked to fix them through `--field-border`, or through the color variable your own field styles use.
+* A contrast check saved by an earlier version still shows. Its field borders show as "not measured" until you run the check again.
+* Tests: a new browser test runs the contrast check in headless Chrome against a sample form. It's skipped when Chrome isn't installed.
+
+= 1.12.2 =
+* Fixed: text fields, text areas and dropdowns now have a visible border in dark mode. They used the plugin's divider color, which measured 1.2 to 1.5:1 against the field and the page. WCAG 2.2 (success criterion 1.4.11, Non-text Contrast) asks for 3:1, because a field's border is what shows where the control is. Fields now use a new color variable, `--field-border` (#9a9aa6 in dark mode): 5.19:1 or more against the plugin's dark backgrounds. Buttons, checkboxes and radio buttons look the same as before, and focus outlines are unchanged. The Contact Form 7 module's fields get the same border.
+* New: the generated palette checks the field border against your palette's dark surfaces. When one of them needs more contrast, it lightens the border until it reaches 3:1. To pick your own color, set it in the Manual CSS tab, for example `html[data-theme="dark"] { --field-border: #a0a0b0; }`. If you added your own field-border rule there as a workaround, you can remove it after updating.
+* Tests: new checks measure the field border against every dark surface, including those an older generated palette can hold. They also confirm that buttons, checkboxes and radio buttons are left out, and that the rule doesn't touch focus styles.
+
+= 1.12.1 =
+* Fixed: the plugin no longer redefines your theme's --accent color. Its stylesheet carried the line `--accent: var(--accent, #1d428a)`, which refers to itself. Browsers treat a variable like that as invalid, and its fallback color never applies. When the line loaded after the theme's own --accent (themes other than GeneratePress, where the plugin's stylesheet loads last), it wiped out the theme's accent color in light mode as well as dark. On GeneratePress the theme's later definition won, so nothing changes there.
+* Tests: a new check fails if any shipped or generated stylesheet has a variable that refers to itself.
 
 = 1.12.0 =
 * New: **Export / Import** (Settings tab) — copy a configured dark mode from one site to another, staging to live, say. Export downloads one JSON file with every setting, the module choices, the generated palette, the AI stylesheet, the Manual CSS and the review instructions. API keys stay out unless you tick "Include API keys" (then they're in the file in plain text — keep it private). Site-specific state stays behind: model lists, the contrast check, pending proposals, and the "host ends long requests" flag.

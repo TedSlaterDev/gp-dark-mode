@@ -30,6 +30,21 @@ final class OGM_GPDM_Palette {
 	 */
 	const BUILTIN_ACCENT = '#1d428a';
 
+	/** The framework's dark --surface-2 / --bg-2: form fields' background until a palette replaces it. */
+	const DARK_SURFACE_2 = '#17284f';
+
+	/**
+	 * The framework's dark --field-border (1.12.2). A text field's border is
+	 * what identifies the control, so it needs 3:1 against the field and the
+	 * page (WCAG 1.4.11). It clears 3:1 against the brightest surfaces the
+	 * generator could emit before 1.12.2 (ramp ranks 1-4, the accent-tinted
+	 * --bg-2), so stored palettes pass without a regenerate.
+	 */
+	const FIELD_BORDER = '#9a9aa6';
+
+	/** WCAG 1.4.11 non-text contrast floor for a form-field border. */
+	const FIELD_BORDER_MIN = 3.0;
+
 	/* ---------------------------------------------------------------------
 	 * Generation
 	 * ------------------------------------------------------------------- */
@@ -318,6 +333,10 @@ final class OGM_GPDM_Palette {
 	 *   the accent.
 	 * - --link, dark: the accent's hue, lightened to 4.5:1 against every dark
 	 *   surface it can sit on.
+	 * - --field-border, dark (1.12.2): emitted only when the framework's
+	 *   value falls under 3:1 against this palette's dark surfaces or the
+	 *   field background; then it is lightened until it doesn't. Otherwise a
+	 *   note records the lowest ratio.
 	 *
 	 * @param array      $palette derive_palette() result.
 	 * @param array|null $accent  find_accent() result.
@@ -330,14 +349,25 @@ final class OGM_GPDM_Palette {
 			'notes' => array(),
 		);
 
+		// Every dark surface a form field can sit on: the framework's page
+		// color and each of the palette's ranked surfaces.
+		$surfaces   = isset( $palette['surfaces'] ) ? $palette['surfaces'] : array();
+		$field_refs = array( self::DARK_REF );
+		foreach ( $surfaces as $slug ) {
+			if ( isset( $palette['map'][ $slug ] ) ) {
+				$field_refs[] = $palette['map'][ $slug ]['dark'];
+			}
+		}
+
 		if ( null !== $accent && self::BUILTIN_ACCENT === self::normalize_hex( $accent['hex'] ) ) {
 			$out['notes'][] = 'Plugin colors: the site accent (' . $accent['from'] . ', ' . $accent['hex'] . ') is the framework\'s built-in accent — its hand-tuned toggle, dark link and alternate-surface colors are kept.';
+			// The fields keep the framework's --surface-2.
+			self::field_border_token( $out, array_merge( $field_refs, array( self::DARK_SURFACE_2 ) ) );
 			return $out;
 		}
 
 		// The dark surfaces derived colors must read against.
-		$surfaces = isset( $palette['surfaces'] ) ? $palette['surfaces'] : array();
-		$refs     = array( self::DARK_REF );
+		$refs = array( self::DARK_REF );
 		if ( isset( $surfaces[0], $palette['map'][ $surfaces[0] ] ) ) {
 			$refs[] = $palette['map'][ $surfaces[0] ]['dark'];
 		}
@@ -356,6 +386,9 @@ final class OGM_GPDM_Palette {
 			$out['dark']['--surface-2'] = array( $alt, $note );
 			$refs[]                     = $alt;
 		}
+
+		// Form fields are painted --surface-2: the derived one, else the framework's.
+		self::field_border_token( $out, array_merge( $field_refs, array( null !== $alt ? $alt : self::DARK_SURFACE_2 ) ) );
 
 		if ( null === $accent ) {
 			$out['notes'][] = 'Plugin colors: no accent found (a colored link or button setting, or a Global Color named accent, primary or brand) — the toggle and dark links keep the framework\'s built-in colors.';
@@ -395,6 +428,44 @@ final class OGM_GPDM_Palette {
 		$out['dark']['--link'] = array( $link, 'links: accent hue, lightened to >= 4.5:1 on the dark surfaces' );
 
 		return $out;
+	}
+
+	/**
+	 * The dark form-field border for a set of dark surfaces (1.12.2): the
+	 * framework's --field-border, lightened in its own hue until it reaches
+	 * 3:1 against every one of them (WCAG 1.4.11).
+	 *
+	 * @param string[] $refs Dark surfaces: the field background and what surrounds it.
+	 * @return array [hex, lowest contrast ratio against $refs]
+	 */
+	public static function field_border( array $refs ) {
+		$lowest = function ( $hex ) use ( $refs ) {
+			return min( array_map( function ( $ref ) use ( $hex ) {
+				return self::contrast_ratio( $hex, $ref );
+			}, $refs ) );
+		};
+
+		$hex               = self::FIELD_BORDER;
+		list( $h, $s, $l ) = self::hex_to_hsl( $hex );
+		$guard             = 0;
+		while ( $lowest( $hex ) < self::FIELD_BORDER_MIN && $l < 0.98 && $guard < 60 ) {
+			$l   = min( 0.98, $l + 0.01 );
+			$hex = self::hsl_to_hex( $h, $s, $l );
+			$guard++;
+		}
+		return array( $hex, $lowest( $hex ) );
+	}
+
+	/** Adds --field-border to derive_tokens() output when the framework's value is too faint here, else a note. */
+	private static function field_border_token( array &$out, array $refs ) {
+		list( $hex, $ratio ) = self::field_border( $refs );
+		// Rounded down, so a note never claims more than was measured.
+		$shown = number_format( floor( $ratio * 10 ) / 10, 1 );
+		if ( self::FIELD_BORDER === $hex ) {
+			$out['notes'][] = 'Form-field borders: the framework\'s --field-border (' . $hex . ') reaches ' . $shown . ':1 or more against the fields and every dark surface here (WCAG 1.4.11 asks 3:1), so it is kept.';
+			return;
+		}
+		$out['dark']['--field-border'] = array( $hex, 'form-field borders: lightened to >= 3:1 against the fields and every dark surface (WCAG 1.4.11; lowest ' . $shown . ':1)' );
 	}
 
 	/**

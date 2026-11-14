@@ -3,7 +3,7 @@
  * Plugin Name:       Dark Mode for GeneratePress
  * Plugin URI:        https://gpdarkmode.com/
  * Description:       Robust, no-flash, accessible dark mode for the GeneratePress theme — with a menu-bar toggle, a behavior settings page, and a clean light/dark CSS-variable framework.
- * Version:           1.12.0
+ * Version:           1.13.1
  * Requires PHP:      7.4
  * Requires at least: 6.0
  * Author:            Orchard Grove Media, LLC
@@ -17,7 +17,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-define( 'OGM_GPDM_VERSION', '1.12.0' );
+define( 'OGM_GPDM_VERSION', '1.13.1' );
 define( 'OGM_GPDM_FILE', __FILE__ );
 define( 'OGM_GPDM_DIR', plugin_dir_path( __FILE__ ) );
 define( 'OGM_GPDM_URL', plugin_dir_url( __FILE__ ) );
@@ -1473,7 +1473,7 @@ final class OGM_GP_Dark_Mode {
 		require_once OGM_GPDM_DIR . 'includes/class-ogm-gpdm-audit.php';
 
 		echo '<h2 class="ogm-gpdm-subhead">' . esc_html__( 'Contrast check', 'gp-dark-mode' ) . '</h2>';
-		echo '<p class="description">' . esc_html__( 'Measures the site as visitors see it: each page below is loaded in a hidden frame — logged out, with scripts off, so no ads or analytics run — and every piece of text is checked against its real background in light and dark mode, with hover and focus states worked out from your CSS. Large panels still light in dark mode are flagged too. It runs in your browser and takes a few seconds per page; an AI review runs it first and is told to fix what it finds.', 'gp-dark-mode' ) . '</p>';
+		echo '<p class="description">' . esc_html__( 'Measures the site as visitors see it: each page below is loaded in a hidden frame — logged out, with scripts off, so no ads or analytics run — and every piece of text is checked against its real background in light and dark mode, with hover and focus states worked out from your CSS. Large panels still light in dark mode are flagged too, and so are form fields whose border is under 3:1 against the field or the background around it. It runs in your browser and takes a few seconds per page; an AI review runs it first and is told to fix what it finds.', 'gp-dark-mode' ) . '</p>';
 		echo '<p><button type="button" class="button" id="ogm-gpdm-run-audit">' . esc_html__( 'Run contrast check', 'gp-dark-mode' ) . '</button> ';
 		echo '<span id="ogm-gpdm-audit-status" aria-live="polite"></span></p>';
 		echo '<div id="ogm-gpdm-audit-result">';
@@ -1487,15 +1487,26 @@ final class OGM_GP_Dark_Mode {
 	/** The stored check as HTML: totals per page, then the worst failures. */
 	public static function audit_summary_html( array $audit ) {
 		$t    = OGM_GPDM_Audit::totals( $audit );
-		$html = '<p class="ogm-gpdm-audit-totals"><strong>' . esc_html(
-			sprintf(
-				/* translators: 1: dark-mode failures, 2: light panels, 3: pages, 4: UTC time. */
+		if ( $t['fields_measured'] ) {
+			$headline = sprintf(
+				/* translators: 1: dark-mode text failures, 2: form-field border failures, 3: light panels, 4: pages. */
+				__( 'Dark mode: %1$d text contrast failure(s), %2$d form-field border(s) under 3:1 and %3$d light panel(s) on %4$d page(s)', 'gp-dark-mode' ),
+				$t['dark'],
+				$t['fields'],
+				$t['islands'],
+				$t['ok']
+			);
+		} else {
+			// A check stored before 1.13.0: form-field borders weren't measured.
+			$headline = sprintf(
+				/* translators: 1: dark-mode failures, 2: light panels, 3: pages. */
 				__( 'Dark mode: %1$d text contrast failure(s) and %2$d light panel(s) on %3$d page(s)', 'gp-dark-mode' ),
 				$t['dark'],
 				$t['islands'],
 				$t['ok']
-			)
-		) . '</strong> <span class="description">' . esc_html(
+			);
+		}
+		$html = '<p class="ogm-gpdm-audit-totals"><strong>' . esc_html( $headline ) . '</strong> <span class="description">' . esc_html(
 			sprintf(
 				/* translators: 1: light-mode failures, 2: UTC timestamp. */
 				__( '(light mode: %1$d — measured %2$s UTC)', 'gp-dark-mode' ),
@@ -1505,14 +1516,16 @@ final class OGM_GP_Dark_Mode {
 		) . '</span></p>';
 
 		$html .= '<details class="ogm-gpdm-audit-details"><summary>' . esc_html__( 'Details', 'gp-dark-mode' ) . '</summary>';
-		$html .= '<table class="widefat striped ogm-gpdm-audit-table"><thead><tr><th>' . esc_html__( 'Page', 'gp-dark-mode' ) . '</th><th>' . esc_html__( 'Text checked', 'gp-dark-mode' ) . '</th><th>' . esc_html__( 'Dark failures', 'gp-dark-mode' ) . '</th><th>' . esc_html__( 'Light panels', 'gp-dark-mode' ) . '</th><th>' . esc_html__( 'Light-mode failures', 'gp-dark-mode' ) . '</th></tr></thead><tbody>';
+		$html .= '<table class="widefat striped ogm-gpdm-audit-table"><thead><tr><th>' . esc_html__( 'Page', 'gp-dark-mode' ) . '</th><th>' . esc_html__( 'Text checked', 'gp-dark-mode' ) . '</th><th>' . esc_html__( 'Dark failures', 'gp-dark-mode' ) . '</th><th>' . esc_html__( 'Field borders', 'gp-dark-mode' ) . '</th><th>' . esc_html__( 'Light panels', 'gp-dark-mode' ) . '</th><th>' . esc_html__( 'Light-mode failures', 'gp-dark-mode' ) . '</th></tr></thead><tbody>';
 		foreach ( $audit['pages'] as $p ) {
 			$html .= '<tr><td><a href="' . esc_url( $p['url'] ) . '" target="_blank" rel="noopener">' . esc_html( $p['label'] ) . '</a></td>';
 			if ( empty( $p['ok'] ) ) {
-				$html .= '<td colspan="4">' . esc_html( '' !== $p['error'] ? $p['error'] : __( 'Could not be checked.', 'gp-dark-mode' ) ) . '</td></tr>';
+				$html .= '<td colspan="5">' . esc_html( '' !== $p['error'] ? $p['error'] : __( 'Could not be checked.', 'gp-dark-mode' ) ) . '</td></tr>';
 				continue;
 			}
-			$html .= '<td>' . (int) $p['texts'] . '</td><td>' . (int) $p['dark_total'] . '</td><td>' . (int) $p['island_total'] . '</td><td>' . (int) $p['light_total'] . '</td></tr>';
+			// A check stored before 1.13.0 has no field measurements.
+			$fields = isset( $p['fields_checked'] ) ? (string) (int) $p['field_total'] : __( 'not measured', 'gp-dark-mode' );
+			$html  .= '<td>' . (int) $p['texts'] . '</td><td>' . (int) $p['dark_total'] . '</td><td>' . esc_html( $fields ) . '</td><td>' . (int) $p['island_total'] . '</td><td>' . (int) $p['light_total'] . '</td></tr>';
 		}
 		$html .= '</tbody></table>';
 
@@ -1526,6 +1539,28 @@ final class OGM_GP_Dark_Mode {
 					. '<code>' . esc_html( $f['selector'] ) . '</code>'
 					. ( 'normal' !== $f['state'] ? ' <em>' . esc_html( $f['state'] ) . '</em>' : '' )
 					. ' — ' . esc_html( number_format( $f['ratio'], 2 ) ) . ':1 <span class="description">(' . esc_html( $label . ( $f['also_light'] ? ' · ' . __( 'also in light mode', 'gp-dark-mode' ) : '' ) ) . ')</span></li>';
+			}
+			$html .= '</ul>';
+		}
+
+		// Form-field borders (1.13.0): the swatch is the field (fill + border) on the color around it.
+		$field_rows = OGM_GPDM_Audit::ranked_field_failures( $audit );
+		if ( ! empty( $field_rows ) ) {
+			$html .= '<p><strong>' . esc_html__( 'Form-field borders under 3:1', 'gp-dark-mode' ) . '</strong></p><ul class="ogm-gpdm-audit-list">';
+			foreach ( array_slice( $field_rows, 0, 25 ) as $f ) {
+				$label = implode( ', ', array_unique( $f['pages'] ) );
+				$html .= '<li><span class="ogm-gpdm-swatch ogm-gpdm-swatch-field" style="background:' . esc_attr( $f['field'] ) . ';border-color:' . esc_attr( $f['border'] ) . ';box-shadow:0 0 0 4px ' . esc_attr( $f['bg'] ) . '" aria-hidden="true"></span> '
+					. '<code>' . esc_html( $f['selector'] ) . '</code>'
+					. ( 'focus' === $f['state'] ? ' <em>' . esc_html__( 'focus', 'gp-dark-mode' ) . '</em>' : '' )
+					. ' — ' . esc_html(
+						sprintf(
+							/* translators: 1: contrast against the field, 2: contrast against the background around it. */
+							__( '%1$s:1 against the field, %2$s:1 against the background', 'gp-dark-mode' ),
+							number_format( $f['ratio_field'], 2 ),
+							number_format( $f['ratio_bg'], 2 )
+						)
+					)
+					. ' <span class="description">(' . esc_html( $label . ( $f['also_light'] ? ' · ' . __( 'also in light mode', 'gp-dark-mode' ) : '' ) ) . ')</span></li>';
 			}
 			$html .= '</ul>';
 		}

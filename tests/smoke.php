@@ -116,6 +116,7 @@ function wp_remote_retrieve_response_code( $r ) { return $r['code']; }
 function wp_remote_retrieve_body( $r ) { return $r['body']; }
 function wp_parse_url( $u, $c = -1 ) { return parse_url( $u, $c ); }
 function esc_url_raw( $u ) { return filter_var( (string) $u, FILTER_SANITIZE_URL ); }
+if ( ! function_exists( 'esc_url' ) ) { function esc_url( $u ) { return esc_attr( esc_url_raw( $u ) ); } }
 function set_transient( $k, $v, $e = 0 ) { $GLOBALS['transients'][ $k ] = $v; return true; }
 function get_transient( $k ) { return isset( $GLOBALS['transients'][ $k ] ) ? $GLOBALS['transients'][ $k ] : false; }
 function delete_transient( $k ) { unset( $GLOBALS['transients'][ $k ] ); return true; }
@@ -1062,12 +1063,94 @@ check( 'audit md: counts, page labels, failed page reason', false !== strpos( $a
 check( 'audit md: light panels listed', false !== strpos( $amd, '`.card.white` — background #ffffff, 600×300px' ) );
 check( 'audit md: the script selector is inert text, not markup', false === strpos( $amd, '<script>' ) );
 
+// ---- v1.13.0: form-field borders (WCAG 1.4.11) ----
+// The fixture above is the pre-1.13.0 shape (no field keys): it must still read.
+check( 'fields compat: an old-shape check has no field measurements', false === $t['fields_measured'] && 0 === $t['fields'] && ! isset( $saved['pages'][0]['fields_checked'] ) && ! isset( $saved['pages'][0]['fields'] ) );
+check( 'fields compat md: says fields were not measured', false !== strpos( $amd, 'Form-field borders were not measured' ) && false !== strpos( $amd, '| 3 | not measured | 1 |' ) );
+check( 'fields compat md: no field section or field method sentence', false === strpos( $amd, 'form-field borders under 3:1' ) && false === strpos( $amd, 'WCAG 1.4.11' ) );
+$old_html = OGM_GP_Dark_Mode::audit_summary_html( $saved );
+check( 'fields compat html: old headline, "not measured" column, failed row spans 5', false !== strpos( $old_html, 'Dark mode: 3 text contrast failure(s) and 1 light panel(s) on 1 page(s)' ) && false !== strpos( $old_html, '<td>not measured</td>' ) && false !== strpos( $old_html, 'colspan="5"' ) && false === strpos( $old_html, 'ogm-gpdm-swatch-field' ) );
+// A check stored by 1.12.x reads straight from the option, never through save_from_json.
+update_option( OGM_GPDM_Audit::OPTION, $saved, false );
+check( 'fields compat: a stored old check still loads and renders', null !== OGM_GPDM_Audit::get() && false !== strpos( OGM_GPDM_Audit::to_markdown( OGM_GPDM_Audit::get() ), 'not measured' ) );
+
+$browser_f = $browser;
+$browser_f['pages'][0] += array( 'fields_checked' => 7, 'field_total' => 4, 'field_light_total' => 1 );
+$browser_f['pages'][0]['fields'] = array(
+	array( 'selector' => '.site-content input.divider', 'sample' => 'Your email', 'border' => '#333340', 'field' => '#1B1B20', 'bg' => '#0f0f12', 'ratio_field' => 1.38, 'ratio_bg' => 1.54, 'ratio' => 9, 'count' => 2, 'state' => 'normal', 'also_light' => false, 'over_image' => false ),
+	array( 'selector' => '#searchform input', 'sample' => 'Search', 'border' => '#444444', 'field' => '#222222', 'bg' => '#111111', 'ratio_field' => 1.62, 'ratio_bg' => 1.93, 'count' => 1, 'state' => 'focus' ),
+	array( 'selector' => '.both textarea', 'sample' => "Message\nhere", 'border' => '#cccccc', 'field' => '#ffffff', 'bg' => '#ffffff', 'ratio_field' => 1.61, 'ratio_bg' => 1.61, 'state' => 'normal', 'also_light' => 1 ),
+	array( 'selector' => '.bad-color', 'border' => 'grey', 'field' => '#000000', 'bg' => '#000000', 'ratio_field' => 1, 'ratio_bg' => 1 ), // bad color: dropped
+	array( 'sample' => 'no selector', 'border' => '#101010', 'field' => '#000000', 'bg' => '#000000', 'ratio_field' => 1, 'ratio_bg' => 1 ), // no selector: dropped
+	array( 'selector' => '<img src=x onerror=alert(1)>', 'border' => '#101010', 'field' => '#000000', 'bg' => '#000000', 'ratio_field' => 0.2, 'ratio_bg' => 50, 'count' => 5000, 'state' => 'hover' ),
+);
+// The same divider field on a second page merges into one row.
+$browser_f['pages'][] = array(
+	'url' => 'https://example.test/a-page/', 'label' => 'A page', 'ok' => true, 'texts' => 90, 'dark_total' => 0, 'light_total' => 0, 'island_total' => 0,
+	'fields_checked' => 2, 'field_total' => 1, 'field_light_total' => 0,
+	'fields' => array( array( 'selector' => '.site-content input.divider', 'sample' => 'Your email', 'border' => '#333340', 'field' => '#1b1b20', 'bg' => '#0f0f12', 'ratio_field' => 1.38, 'ratio_bg' => 1.54, 'count' => 1, 'state' => 'normal' ) ),
+);
+$fsaved = OGM_GPDM_Audit::save_from_json( json_encode( $browser_f ) );
+$ff     = $fsaved['pages'][0]['fields'];
+check( 'fields save: counts kept per page', 7 === $fsaved['pages'][0]['fields_checked'] && 4 === $fsaved['pages'][0]['field_total'] && 1 === $fsaved['pages'][0]['field_light_total'] );
+check( 'fields save: rows without a selector or with a bad color dropped, hex lowercased', 4 === count( $ff ) && '#1b1b20' === $ff[0]['field'] );
+check( 'fields save: overall ratio recomputed from the two, never taken from the payload', 1.38 === $ff[0]['ratio'] && 1.38 === $ff[0]['ratio_field'] && 1.54 === $ff[0]['ratio_bg'] );
+check( 'fields save: ratios clamped to 1–21, count capped, unknown state → normal', 1.0 === $ff[3]['ratio_field'] && 21.0 === $ff[3]['ratio_bg'] && 1.0 === $ff[3]['ratio'] && 999 === $ff[3]['count'] && 'normal' === $ff[3]['state'] );
+check( 'fields save: focus state and also_light kept, sample flattened', 'focus' === $ff[1]['state'] && true === $ff[2]['also_light'] && false === $ff[0]['also_light'] && false === strpos( $ff[2]['sample'], "\n" ) );
+$many = $browser_f;
+$many['pages'][0]['fields'] = array_fill( 0, 45, $browser_f['pages'][0]['fields'][0] );
+$msaved = OGM_GPDM_Audit::save_from_json( json_encode( $many ) );
+check( 'fields save: at most MAX_FIELDS rows per page', OGM_GPDM_Audit::MAX_FIELDS === count( $msaved['pages'][0]['fields'] ) );
+$ft = OGM_GPDM_Audit::totals( $fsaved );
+check( 'fields totals: measured, summed across pages', true === $ft['fields_measured'] && 5 === $ft['fields'] && 9 === $ft['fields_checked'] && 1 === $ft['fields_light'] && 3 === $ft['dark'] );
+
+$ranked = OGM_GPDM_Audit::ranked_field_failures( $fsaved );
+check( 'fields ranked: merged across pages (count + pages)', 4 === count( $ranked ) && 3 === $ranked[1]['count'] && array( 'Homepage', 'A page' ) === $ranked[1]['pages'] );
+check( 'fields ranked: dark-only worst first, light-too last', 1.0 === $ranked[0]['ratio'] && '.site-content input.divider' === $ranked[1]['selector'] && 'focus' === $ranked[2]['state'] && '.both textarea' === $ranked[3]['selector'] );
+
+$fmd = OGM_GPDM_Audit::to_markdown( $fsaved );
+check( 'fields md: method sentence and totals', false !== strpos( $fmd, 'WCAG 1.4.11' ) && false !== strpos( $fmd, '5 dark-mode form-field border failure(s) (9 fields with a border measured)' ) && false === strpos( $fmd, 'were not measured' ) );
+check( 'fields md: table column per page', false !== strpos( $fmd, '| 3 | 4 | 1 |' ) && false !== strpos( $fmd, '| 0 | 1 | 0 |' ) );
+check( 'fields md: section after text failures, before light panels', strpos( $fmd, '### Dark-mode text failures' ) < strpos( $fmd, '### Dark-mode form-field borders under 3:1' ) && strpos( $fmd, '### Dark-mode form-field borders under 3:1' ) < strpos( $fmd, '### Light panels' ) );
+check( 'fields md: one line says border, both ratios, both colors', false !== strpos( $fmd, '- `.site-content input.divider` — "Your email" — border #333340 = 1.38:1 against the field (#1b1b20) and 1.54:1 against the background around it (#0f0f12); needs 3:1 against both ×3 · Homepage, A page' ) );
+check( 'fields md: focus marked, light-too marked, --field-border named', false !== strpos( $fmd, '`#searchform input` [focus]' ) && 1 === preg_match( '~`\.both textarea`[^\n]*also fails in light mode~', $fmd ) && false !== strpos( $fmd, '`--field-border`' ) );
+
+$fhtml = OGM_GP_Dark_Mode::audit_summary_html( $fsaved );
+check( 'fields html: headline counts field borders', false !== strpos( $fhtml, '3 text contrast failure(s), 5 form-field border(s) under 3:1 and 1 light panel(s) on 2 page(s)' ) );
+check( 'fields html: column per page and a field list with swatches', false !== strpos( $fhtml, '<td>4</td>' ) && false !== strpos( $fhtml, 'Form-field borders under 3:1' ) && false !== strpos( $fhtml, 'ogm-gpdm-swatch-field" style="background:#1b1b20;border-color:#333340;box-shadow:0 0 0 4px #0f0f12"' ) );
+check( 'fields html: focus marked, both ratios shown', false !== strpos( $fhtml, '<em>focus</em>' ) && false !== strpos( $fhtml, '1.38:1 against the field, 1.54:1 against the background' ) );
+check( 'fields html: selectors escaped', false === strpos( $fhtml, '<img' ) && false !== strpos( $fhtml, '&lt;img src=x' ) );
+
+$no_field_fail = $browser_f;
+foreach ( $no_field_fail['pages'] as &$nfp ) {
+	if ( isset( $nfp['fields'] ) ) {
+		$nfp['fields'] = array();
+		$nfp['field_total'] = 0;
+	}
+	$nfp['failures'] = array();
+	$nfp['islands']  = array();
+}
+unset( $nfp );
+$clean = OGM_GPDM_Audit::save_from_json( json_encode( $no_field_fail ) );
+check( 'fields md: a clean check with fields measured says no failures', false !== strpos( OGM_GPDM_Audit::to_markdown( $clean ), 'No dark-mode contrast failures or light panels were measured' ) );
+$only_fields = $browser_f;
+foreach ( $only_fields['pages'] as &$ofp ) {
+	$ofp['failures'] = array();
+	$ofp['islands']  = array();
+}
+unset( $ofp );
+$omd = OGM_GPDM_Audit::to_markdown( OGM_GPDM_Audit::save_from_json( json_encode( $only_fields ) ) );
+check( 'fields md: field failures alone are never reported as "no failures"', false !== strpos( $omd, '### Dark-mode form-field borders under 3:1' ) && false === strpos( $omd, 'No dark-mode contrast failures' ) );
+$fsaved = OGM_GPDM_Audit::save_from_json( json_encode( $browser_f ) ); // the stored check for the bundle and prompts below
+
 // The bundle carries it, the prompt points at it.
 $GLOBALS['wp_options']['ogm_gpdm_settings'] = array( 'ai_provider' => 'anthropic', 'ai_api_key_anthropic' => 'sk-a', 'ai_mode' => 'direct' );
 reset_settings_cache( $plugin );
 $bmd = OGM_GPDM_Bundle::to_markdown( OGM_GPDM_Bundle::assemble( $plugin ) );
 check( 'bundle: section 6 present with the measured rows', false !== strpos( $bmd, '## 6. Measured contrast in dark mode' ) && false !== strpos( $bmd, '#footer .widget a' ) );
 check( 'bundle: contract says section 6 is measured', false !== strpos( $bmd, 'Section 6, when present' ) );
+check( 'bundle: section 6 carries form-field borders, contract names them', false !== strpos( $bmd, '### Dark-mode form-field borders under 3:1' ) && false !== strpos( $bmd, 'form-field border under 3:1 and light panel it lists' ) );
+check( 'prompt: MEASURED PROBLEMS covers field borders and --field-border', false !== strpos( OGM_GPDM_AI::build_user_prompt( $bmd ), "border must reach 3:1 against both the field's own fill and the background around it" ) && false !== strpos( OGM_GPDM_AI::build_user_prompt( $bmd ), '--field-border' ) );
 check( 'prompt: MEASURED PROBLEMS instruction when the bundle has a check', false !== strpos( OGM_GPDM_AI::build_user_prompt( $bmd ), 'MEASURED PROBLEMS' ) );
 check( 'prompt: no measured instruction without a check', false === strpos( OGM_GPDM_AI::build_user_prompt( 'bundle without section six' ), 'MEASURED PROBLEMS' ) );
 $GLOBALS['ai_requests'] = array();
@@ -1084,6 +1167,7 @@ $cp = OGM_GPDM_Audit::chrome_prompt( $plugin );
 check( 'chrome prompt: site, pages, how dark mode works', false !== strpos( $cp, 'Example Site' ) && false !== strpos( $cp, 'https://example.test/category/news/' ) && false !== strpos( $cp, 'data-theme="dark"' ) );
 check( 'chrome prompt: measured problems, current AI + Manual CSS, deliverable', false !== strpos( $cp, '#footer .widget a' ) && false !== strpos( $cp, '.ai-now' ) && false !== strpos( $cp, '.manual-now' ) && false !== strpos( $cp, 'ONE ```css code block' ) );
 check( 'chrome prompt: no API key, no functions.php', false === strpos( $cp, 'sk-a' ) && false === strpos( $cp, 'functions.php' ) );
+check( 'chrome prompt: measured field borders included', false !== strpos( $cp, '`.site-content input.divider` — "Your email" — border #333340' ) );
 delete_option( OGM_GPDM_Audit::OPTION );
 check( 'chrome prompt: says when nothing was measured', false !== strpos( OGM_GPDM_Audit::chrome_prompt( $plugin ), 'contrast check hasn\'t been run' ) );
 

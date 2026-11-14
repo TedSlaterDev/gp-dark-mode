@@ -38,10 +38,32 @@ proof of the behaviors described here.
   `_generate_block_type = site-header` and points to the block. Filter:
   `ogm_gpdm_toggle_markup`.
 - Palette tokens: `--bg --bg-2 --surface --surface-2 --text --text-muted
-  --border --link --dm-accent --dm-glow` (light values on `:root`, dark under
-  `html[data-theme="dark"]`). `--dm-glow` (1.8.0) is the toggle's hover fill
-  (#0056ff light / #122666 dark built in — the old literals, so the toggle
-  renders pixel-identically).
+  --border --field-border --link --dm-accent --dm-glow` (light values on
+  `:root`, dark under `html[data-theme="dark"]`). `--dm-glow` (1.8.0) is the
+  toggle's hover fill (#0056ff light / #122666 dark built in — the old
+  literals, so the toggle renders pixel-identically). `--field-border`
+  (1.12.2) is the form-field border: `--border` is a divider color, and on
+  fields it measured 1.16–1.54:1, failing WCAG 1.4.11. A field border must
+  reach 3:1 against the field and the page. Dark `#9a9aa6`: 5.19:1 or more
+  on every framework surface, and 3:1 or more on every surface a pre-1.12.2
+  generated palette can hold. Light `#767680`: 3.82:1 or more. The forms rule
+  that applies it excludes submit/button/reset/image/checkbox/radio inputs.
+  It uses `:where()`, so its specificity equals the base forms rule (0,2,2):
+  it wins by order, and Manual CSS can override it with the same selector.
+  It sets `border-color` only, never outline, box-shadow or `:focus`. The
+  Contact Form 7 module carries the same rule at its own specificity.
+  1.13.1: the same rule also has unscoped selectors
+  (`html[data-theme="dark"] input:where(…)`, `textarea`, `select`, all
+  (0,1,2)) for fields outside `.site-content`: widget areas in the header,
+  top bar, footer and off-canvas panel, page heroes, hook elements. There
+  GeneratePress paints the border `var(--base)` on a `var(--base-2)` fill
+  (inc/css-output.php, (0,1,1)), and the generated palette makes both dark:
+  1.16:1 on GP's default colors. (0,1,2) beats that rule and stays under the
+  content-area rules. GP's `input[type=…]:focus` (0,2,1) still wins, so text
+  inputs keep GP's focus color there; its `textarea:focus`/`select:focus` are
+  (0,1,1), so those keep `--field-border` on focus, as all fields inside
+  `.site-content` do. GP's navigation search and search modal fields are
+  borderless (`border: 0`) and unaffected.
 
 ## 2. The five stylesheet layers (cascade order)
 
@@ -54,8 +76,8 @@ themes fall back to a late standalone stylesheet.
 
 | # | Layer | Source | Toggle | Notes |
 |---|-------|--------|--------|-------|
-| 1 | Framework | `assets/css/gp-dark-mode.css` | always | Mechanics + tokens + toggle component. **INERT in light mode** (1.3.2): every global rule is dark-scoped. The self-referential `--accent: var(--accent, #1d428a)` is kept verbatim — GP's dynamic CSS redefines it later so it stays valid (brand color on the reference site); on themes without `--accent` it computes to transparent. |
-| 2 | Generated palette | option `ogm_gpdm_generated_css` (GEN_KEY, autoloaded) | `enable_generated` (default 0 — opt-in, review first) | `OGM_GPDM_Palette::generate()`: GP Global Colors → RANK-BASED dark ramps (never naive inversion — it collapses GP's near-white surface ramp). Surfaces: lightest→darkest, L = 0.07 + 0.045·rank. Text tiers: 0.92 − 0.10·rank with WCAG floors (4.5:1 primary, 3:1 others). Classification is USAGE-AWARE: `usage_roles()` reads where each color is actually used (GP settings values holding `var(--slug)` or the literal hex, keyed background→surface / text·title·link→text; plus `background*: var(--slug)` / `color: var(--slug)` in Customizer CSS and child style.css) and real usage overrides the slug-name guess — slug names lie (live case: a dark site header painted with `var(--contrast)`). Conflicting usage (both roles) → left unchanged with a note; utility and brand classes are exempt from overrides. Already-light text, ALREADY-DARK surfaces (L ≤ 0.32 — mirror rule; inverting them would lighten a deliberately dark header/footer), `white`/`black` utility slugs, and readable brand colors (≥3:1) stay untouched; too-dark brands are lightened to 3:1. Saturated colors in text slots keep hue strength (s cap 0.55 when s ≥ 0.40). `rgb()/rgba()` parsed; unparseable/unclassified colors are listed in output comments, never silently dropped. **Plugin tokens (1.8.0)** — a second block (`derive_tokens()`) recolors the plugin's own pieces from the site: `find_accent()` = the color `link_color` resolves to, else `form_button_background_color`, else a Global Color whose slug says accent/primary/brand (neutral candidates — s < 0.25, L < 0.12 or > 0.88 — skipped). `:root` gets `--dm-accent` = accent and `--dm-glow` = accent hue, s + 0.35, L ≥ 0.50, lowered until white icons reach 3:1; dark gets `--dm-glow` = accent hue at L 0.235, `--link` = accent hue (s ≤ 0.55) from L 0.72 up to 4.5:1 against DARK_REF, the rank-1 surface and `--bg-2`, and `--bg-2`/`--surface-2` = the rank-2 surface (else an accent tint at L 0.20). A site whose accent IS the framework's built-in `#1d428a` (`BUILTIN_ACCENT`) emits none of these — its companions were hand-tuned for it (the reference site regenerates to an identical look); no accent → toggle/link tokens stay built-in, with a note. |
+| 1 | Framework | `assets/css/gp-dark-mode.css` | always | Mechanics + tokens + toggle component. **INERT in light mode** (1.3.2): every global rule is dark-scoped. The framework never defines `--accent` (1.12.1). It is the theme's variable. The inherited `--accent: var(--accent, #1d428a)` was removed: a self-reference is a cycle, invalid, and its fallback never applies. It only looked harmless on GP, where GP's later definition won. On non-GP themes (framework = a late standalone sheet) it wiped out the theme's accent in both modes. `tests/unit.php` fails on any self-referencing custom property, shipped or generated. |
+| 2 | Generated palette | option `ogm_gpdm_generated_css` (GEN_KEY, autoloaded) | `enable_generated` (default 0 — opt-in, review first) | `OGM_GPDM_Palette::generate()`: GP Global Colors → RANK-BASED dark ramps (never naive inversion — it collapses GP's near-white surface ramp). Surfaces: lightest→darkest, L = 0.07 + 0.045·rank. Text tiers: 0.92 − 0.10·rank with WCAG floors (4.5:1 primary, 3:1 others). Classification is USAGE-AWARE: `usage_roles()` reads where each color is actually used (GP settings values holding `var(--slug)` or the literal hex, keyed background→surface / text·title·link→text; plus `background*: var(--slug)` / `color: var(--slug)` in Customizer CSS and child style.css) and real usage overrides the slug-name guess — slug names lie (live case: a dark site header painted with `var(--contrast)`). Conflicting usage (both roles) → left unchanged with a note; utility and brand classes are exempt from overrides. Already-light text, ALREADY-DARK surfaces (L ≤ 0.32 — mirror rule; inverting them would lighten a deliberately dark header/footer), `white`/`black` utility slugs, and readable brand colors (≥3:1) stay untouched; too-dark brands are lightened to 3:1. Saturated colors in text slots keep hue strength (s cap 0.55 when s ≥ 0.40). `rgb()/rgba()` parsed; unparseable/unclassified colors are listed in output comments, never silently dropped. **Plugin tokens (1.8.0)** — a second block (`derive_tokens()`) recolors the plugin's own pieces from the site: `find_accent()` = the color `link_color` resolves to, else `form_button_background_color`, else a Global Color whose slug says accent/primary/brand (neutral candidates — s < 0.25, L < 0.12 or > 0.88 — skipped). `:root` gets `--dm-accent` = accent and `--dm-glow` = accent hue, s + 0.35, L ≥ 0.50, lowered until white icons reach 3:1; dark gets `--dm-glow` = accent hue at L 0.235, `--link` = accent hue (s ≤ 0.55) from L 0.72 up to 4.5:1 against DARK_REF, the rank-1 surface and `--bg-2`, and `--bg-2`/`--surface-2` = the rank-2 surface (else an accent tint at L 0.20). `--field-border` (1.12.2, `field_border()`) is checked against DARK_REF, every ranked surface and the field background (the derived `--surface-2`, else the framework's `DARK_SURFACE_2`). It is emitted only when the framework's `FIELD_BORDER` falls under 3:1 there, and then it is lightened in its own hue until it reaches 3:1. Otherwise a note records the lowest ratio, rounded down. This check also runs for the built-in accent, where only a failing border would be emitted. A site whose accent IS the framework's built-in `#1d428a` (`BUILTIN_ACCENT`) emits none of these — its companions were hand-tuned for it (the reference site regenerates to an identical look); no accent → toggle/link tokens stay built-in, with a note. |
 | 3 | Integration modules | `assets/css/modules/*.css` | `modules[slug]` checkboxes | Registry in `OGM_GP_Dark_Mode::modules()`: gp-chrome (default on), revcontent (manual — script-injected, undetectable), ad-inserter / givewp / forminator (auto-detected ON at fresh activation only). Written against vendors' STABLE generic selectors; per-placement selectors belong in Layer 4b. Plugin-versioned: fixes ship to every site. |
 | 4a | AI stylesheet | option `ogm_gpdm_ai_css` (autoloaded) | `enable_ai_css` (default 1) | Machine-owned. Each accepted proposal replaces it wholesale. Backup/swap (`ogm_gpdm_ai_backup`) operates on THIS layer only. |
 | 4b | Manual CSS | setting `custom_css` | `enable_custom_css` (default 1) | The owner's layer. Loads LAST, always wins, never touched by the AI. Starts EMPTY — since 1.6.0 the plugin ships no site-specific CSS; the reference site's old residue is a test fixture (`tests/fixtures/theme-manual-css.css`), pasted into that site's own Manual tab at deploy. |
@@ -229,6 +251,29 @@ click re-measures unless the stored check is < 5 min old. Live-verified on a
 fixture site: e.g. #444 on #0f0f12 = 1.96:1, a hover-only #222 failure, a
 both-modes #777 (also_light), async CSS applied, script-injected text and
 noscript pixel never loaded.
+**Form-field borders (1.13.0, WCAG 1.4.11)** — `fieldElements()`: text-like
+inputs (not hidden/submit/button/reset/image/checkbox/radio/range/color/file),
+`select`, `textarea`; ≤300 per page. `measureField()`: surround =
+`backgroundOf(parent)`, field = `backgroundOf(el)`; each visible border side
+(width ≥ .5px, style not none/hidden, alpha > 0) is composited over the field
+(background-clip border-box) or the surround and measured against both; the
+side with the best lower ratio wins. A field fails when that lower ratio AND
+the fill-vs-surround ratio are both under 3 (a field identified by its fill
+passes; borderless fields aren't counted). Light pass sets `also_light`; dark
+pass at rest; then, when state twins exist, each field is re-measured with
+`.gpdm-force-focus` and a `focus` row is added only when focus changes the
+border or field color and it fails. Page keys: `fields_checked`,
+`field_total`, `field_light_total`, `fields` (≤30 rows: selector; sample =
+placeholder / aria-label / name / tag, never the value; border, field, bg,
+ratio_field, ratio_bg, count, state normal|focus, also_light, over_image).
+`save_from_json()` keeps them only when `fields_checked` is present and
+recomputes `ratio` as the lower of the two. A check stored before 1.13.0 has
+none: `totals()['fields_measured']` is false, and the Markdown and AI-tab
+summary say "not measured" (never 0). Markdown: "Dark-mode form-field borders
+under 3:1, worst first" after the text failures. The bundle contract and the
+MEASURED PROBLEMS prompt name field borders and `--field-border`; the Chrome
+prompt carries the rows via `to_markdown()`. `tests/browser.php` runs the
+engine in headless Chrome on `tests/fixtures/audit/fields.html`.
 **Claude in Chrome panel** — `OGM_GPDM_Audit::chrome_prompt()` (site, stack,
 Global Colors, layer contract, pages at 1280 + 390px, method incl. live
 `<style id="gpdm-trial">` testing, the measured problems, current AI + Manual
@@ -308,12 +353,24 @@ auto-reloads (it would destroy unsaved form edits) — it offers a link.
 
 - `unit.php` — pure functions: CSS extractor (incl. malformed-input resync),
   secret redaction, palette color math + ramp derivation, model ranking,
-  AI response parsing, framework light-inertness guards.
+  AI response parsing, framework light-inertness guards, form-field border
+  contrast (1.12.2: token ratios, pre-1.12.2 palette surfaces at every hue,
+  exclusions, specificity, no focus/outline rules, CF7 module, generator;
+  1.13.1: the site-wide selectors against GP's own field and :focus rules,
+  and GP's default colors under the generated palette).
 - `coverage.php` — the 341-pair decomposition proof.
 - `smoke.php` — end-to-end under a stubbed WP: bundle assembly, five-layer
   cascade order, migrations, AI pipeline (both providers, refusal,
   truncation, missing key), apply/restore on the AI layer with Manual
-  untouched, status lifecycle, key semantics.
+  untouched, status lifecycle, key semantics, the contrast-check report
+  (1.13.0: field-border validation, totals, ranking, Markdown, AI-tab
+  summary, and checks stored before field borders were measured).
+- `browser.php` (1.13.0, optional) — the contrast-check engine in headless
+  Chrome against `tests/fixtures/audit/fields.html` via `harness.html`,
+  served by `php -S`. 1.13.1 adds `gp-outside.html`: the real framework
+  stylesheet, GP's field rules and the generated palette for GP's default
+  colors, with fields in the header, content and footer. Skipped when no
+  Chrome/Chromium is found (`CHROME=/path` picks one).
 
 Every confirmed finding from an adversarial review round gets a regression
 test named for it. The optional child-theme reference fixture at
@@ -332,6 +389,6 @@ tests/fixtures/theme-manual-css.css    reference-site residue (fixture, not ship
 assets/js/dark-mode-toggle.js        Front-end toggle behavior
 blocks/toggle/                       Dark Mode Toggle block (block.json, index.js, index.asset.php, editor.css)
 assets/admin/gp-dark-mode-admin.*    Settings-page CSS/JS (tabs, models, review polling)
-tests/                               run.sh + unit/coverage/smoke + fixtures
+tests/                               run.sh + unit/coverage/smoke/browser + fixtures (fixtures/audit: contrast-check page + harness)
 uninstall.php                        Full cleanup, multisite-aware
 ```

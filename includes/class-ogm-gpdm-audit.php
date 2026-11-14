@@ -6,7 +6,9 @@
  * (assets/admin/gp-dark-mode-audit.js): each page is fetched as a logged-out
  * visitor, rendered in a hidden, script-less iframe, and measured in light and
  * dark mode — text contrast against its real background, large light panels
- * left in dark mode, and hover/focus states emulated from the site's own CSS.
+ * left in dark mode, hover/focus states emulated from the site's own CSS, and
+ * (1.13.0) form-field borders against the field and its surroundings (WCAG
+ * 1.4.11, 3:1).
  * This class picks the pages, validates and stores the result, and turns it
  * into Markdown for the AI Context Bundle and the Claude in Chrome prompt.
  *
@@ -28,6 +30,7 @@ final class OGM_GPDM_Audit {
 	const MAX_PAGES       = 10;
 	const MAX_FAILURES    = 60; // Per page.
 	const MAX_ISLANDS     = 20; // Per page.
+	const MAX_FIELDS      = 30; // Field-border failures per page (1.13.0).
 	const MAX_PROMPT_ROWS = 40; // Failures listed in a prompt, worst first.
 
 	/**
@@ -171,6 +174,41 @@ final class OGM_GPDM_Audit {
 				'failures'     => array(),
 				'islands'      => array(),
 			);
+			// Form-field borders (1.13.0). A check from an older engine has
+			// none of these keys; the page then records the fields as not measured.
+			if ( isset( $p['fields_checked'] ) ) {
+				$page['fields_checked']    = self::count( $p, 'fields_checked' );
+				$page['field_total']       = self::count( $p, 'field_total' );
+				$page['field_light_total'] = self::count( $p, 'field_light_total' );
+				$page['fields']            = array();
+				foreach ( isset( $p['fields'] ) && is_array( $p['fields'] ) ? array_slice( $p['fields'], 0, self::MAX_FIELDS ) : array() as $f ) {
+					if ( ! is_array( $f ) || empty( $f['selector'] ) ) {
+						continue;
+					}
+					$border = self::hex( isset( $f['border'] ) ? $f['border'] : '' );
+					$field  = self::hex( isset( $f['field'] ) ? $f['field'] : '' );
+					$bg     = self::hex( isset( $f['bg'] ) ? $f['bg'] : '' );
+					if ( '' === $border || '' === $field || '' === $bg ) {
+						continue;
+					}
+					$ratio_field        = self::ratio( $f, 'ratio_field' );
+					$ratio_bg           = self::ratio( $f, 'ratio_bg' );
+					$page['fields'][] = array(
+						'selector'    => self::text( $f['selector'], 200 ),
+						'sample'      => self::text( isset( $f['sample'] ) ? $f['sample'] : '', 80 ),
+						'border'      => $border,
+						'field'       => $field,
+						'bg'          => $bg,
+						'ratio_field' => $ratio_field,
+						'ratio_bg'    => $ratio_bg,
+						'ratio'       => min( $ratio_field, $ratio_bg ), // Recomputed, never taken from the payload.
+						'count'       => max( 1, min( 999, (int) ( isset( $f['count'] ) ? $f['count'] : 1 ) ) ),
+						'state'       => ( isset( $f['state'] ) && 'focus' === $f['state'] ) ? 'focus' : 'normal',
+						'also_light'  => ! empty( $f['also_light'] ),
+						'over_image'  => ! empty( $f['over_image'] ),
+					);
+				}
+			}
 
 			foreach ( isset( $p['failures'] ) && is_array( $p['failures'] ) ? array_slice( $p['failures'], 0, self::MAX_FAILURES ) : array() as $f ) {
 				$fg = self::hex( isset( $f['fg'] ) ? $f['fg'] : '' );
@@ -222,14 +260,22 @@ final class OGM_GPDM_Audit {
 		return $audit;
 	}
 
-	/** Totals across pages: ['pages', 'ok', 'dark', 'light', 'islands']. */
+	/**
+	 * Totals across pages: ['pages', 'ok', 'dark', 'light', 'islands',
+	 * 'fields' (dark-mode field-border failures), 'fields_light',
+	 * 'fields_checked', 'fields_measured' (false for a check from before 1.13.0)].
+	 */
 	public static function totals( array $audit ) {
 		$t = array(
-			'pages'   => 0,
-			'ok'      => 0,
-			'dark'    => 0,
-			'light'   => 0,
-			'islands' => 0,
+			'pages'           => 0,
+			'ok'              => 0,
+			'dark'            => 0,
+			'light'           => 0,
+			'islands'         => 0,
+			'fields'          => 0,
+			'fields_light'    => 0,
+			'fields_checked'  => 0,
+			'fields_measured' => false,
 		);
 		foreach ( $audit['pages'] as $p ) {
 			++$t['pages'];
@@ -238,6 +284,12 @@ final class OGM_GPDM_Audit {
 				$t['dark']    += (int) $p['dark_total'];
 				$t['light']   += (int) $p['light_total'];
 				$t['islands'] += (int) $p['island_total'];
+				if ( isset( $p['fields_checked'] ) ) {
+					$t['fields_measured'] = true;
+					$t['fields']         += (int) $p['field_total'];
+					$t['fields_light']   += (int) $p['field_light_total'];
+					$t['fields_checked'] += (int) $p['fields_checked'];
+				}
 			}
 		}
 		return $t;
@@ -293,24 +345,80 @@ final class OGM_GPDM_Audit {
 		return $rows;
 	}
 
+	/** Form-field border failures across all pages, ranked like ranked_failures(). */
+	public static function ranked_field_failures( array $audit ) {
+		$rows = array();
+		foreach ( $audit['pages'] as $p ) {
+			foreach ( isset( $p['fields'] ) && is_array( $p['fields'] ) ? $p['fields'] : array() as $f ) {
+				$key = $f['selector'] . '|' . $f['border'] . '|' . $f['field'] . '|' . $f['bg'] . '|' . $f['state'];
+				if ( isset( $rows[ $key ] ) ) {
+					$rows[ $key ]['count'] += $f['count'];
+					$rows[ $key ]['pages'][] = $p['label'];
+					continue;
+				}
+				$rows[ $key ]          = $f;
+				$rows[ $key ]['pages'] = array( $p['label'] );
+			}
+		}
+		$rows = array_values( $rows );
+		usort(
+			$rows,
+			function ( $a, $b ) {
+				if ( $a['also_light'] !== $b['also_light'] ) {
+					return $a['also_light'] ? 1 : -1;
+				}
+				return ( $a['ratio'] < $b['ratio'] ) ? -1 : ( ( $a['ratio'] > $b['ratio'] ) ? 1 : 0 );
+			}
+		);
+		return $rows;
+	}
+
+	/** One Markdown line per field-border failure. */
+	private static function field_line( array $f, $page_label ) {
+		$line = '- `' . $f['selector'] . '`' . ( 'focus' === $f['state'] ? ' [focus]' : '' );
+		if ( '' !== $f['sample'] ) {
+			$line .= ' — "' . $f['sample'] . '"';
+		}
+		$line .= ' — border ' . $f['border'] . ' = ' . number_format( $f['ratio_field'], 2 ) . ':1 against the field (' . $f['field'] . ') and ' . number_format( $f['ratio_bg'], 2 ) . ':1 against the background around it (' . $f['bg'] . '); needs 3:1 against both';
+		if ( $f['count'] > 1 ) {
+			$line .= ' ×' . $f['count'];
+		}
+		$line .= ' · ' . $page_label;
+		if ( $f['over_image'] ) {
+			$line .= ' · background is an image/gradient — the color shown is the nearest solid one';
+		}
+		if ( $f['also_light'] ) {
+			$line .= ' · also fails in light mode (the site\'s own design)';
+		}
+		return $line . "\n";
+	}
+
 	/**
 	 * The Markdown section for the AI Context Bundle (and the Claude in
 	 * Chrome prompt): how it was measured, per-page totals, failures worst
-	 * first, light panels.
+	 * first, form-field borders, light panels.
 	 */
 	public static function to_markdown( array $audit, $max_rows = 120, $heading = '## 6. Measured contrast in dark mode' ) {
 		$t   = self::totals( $audit );
 		$md  = $heading . ' (browser check, ' . $audit['created'] . " UTC)\n\n";
-		$md .= 'Measured by the plugin in the site owner\'s browser: each page rendered as a logged-out visitor at ' . (int) $audit['width'] . "px wide with scripts off (so ads and script-built widgets are NOT measured), in light and in dark mode, with the CURRENT dark mode — framework, palette, modules, AI stylesheet and Manual CSS — applied. Hover and focus states are emulated from the site's own same-origin CSS. Text needs 4.5:1 contrast against its actual background (3:1 for large text: 24px+, or 18.7px+ bold). A \"light panel\" is a large element whose own background is still light in dark mode.\n\n";
-		$md .= sprintf( "Totals: %d page(s) checked, %d dark-mode text failure(s), %d light panel(s); for comparison, %d text failure(s) in light mode.\n\n", $t['ok'], $t['dark'], $t['islands'], $t['light'] );
+		$md .= 'Measured by the plugin in the site owner\'s browser: each page rendered as a logged-out visitor at ' . (int) $audit['width'] . "px wide with scripts off (so ads and script-built widgets are NOT measured), in light and in dark mode, with the CURRENT dark mode — framework, palette, modules, AI stylesheet and Manual CSS — applied. Hover and focus states are emulated from the site's own same-origin CSS. Text needs 4.5:1 contrast against its actual background (3:1 for large text: 24px+, or 18.7px+ bold). A \"light panel\" is a large element whose own background is still light in dark mode.";
+		if ( $t['fields_measured'] ) {
+			$md .= ' A form field (text input, select or textarea) with a visible border needs that border at 3:1 against the field\'s own background AND the background around it (WCAG 1.4.11 non-text contrast), at rest and on focus. A field whose fill already stands out 3:1 from its surroundings is identified by the fill and is not listed.';
+		}
+		$md .= "\n\n";
+		if ( $t['fields_measured'] ) {
+			$md .= sprintf( "Totals: %d page(s) checked, %d dark-mode text failure(s), %d dark-mode form-field border failure(s) (%d fields with a border measured), %d light panel(s); for comparison, %d text failure(s) and %d field-border failure(s) in light mode.\n\n", $t['ok'], $t['dark'], $t['fields'], $t['fields_checked'], $t['islands'], $t['light'], $t['fields_light'] );
+		} else {
+			$md .= sprintf( "Totals: %d page(s) checked, %d dark-mode text failure(s), %d light panel(s); for comparison, %d text failure(s) in light mode. (Form-field borders were not measured: this check ran on a plugin version before 1.13.0.)\n\n", $t['ok'], $t['dark'], $t['islands'], $t['light'] );
+		}
 
-		$md .= "| Page | Text elements | Dark-mode failures | Light panels | Light-mode failures |\n|---|---|---|---|---|\n";
+		$md .= "| Page | Text elements | Dark-mode failures | Field-border failures | Light panels | Light-mode failures |\n|---|---|---|---|---|---|\n";
 		foreach ( $audit['pages'] as $p ) {
 			if ( empty( $p['ok'] ) ) {
-				$md .= '| ' . $p['label'] . ' (' . $p['url'] . ') | not checked: ' . ( '' !== $p['error'] ? $p['error'] : 'failed to load' ) . " | | | |\n";
+				$md .= '| ' . $p['label'] . ' (' . $p['url'] . ') | not checked: ' . ( '' !== $p['error'] ? $p['error'] : 'failed to load' ) . " | | | | |\n";
 				continue;
 			}
-			$md .= '| ' . $p['label'] . ' (' . $p['url'] . ') | ' . (int) $p['texts'] . ' | ' . (int) $p['dark_total'] . ' | ' . (int) $p['island_total'] . ' | ' . (int) $p['light_total'] . " |\n";
+			$md .= '| ' . $p['label'] . ' (' . $p['url'] . ') | ' . (int) $p['texts'] . ' | ' . (int) $p['dark_total'] . ' | ' . ( isset( $p['fields_checked'] ) ? (int) $p['field_total'] : 'not measured' ) . ' | ' . (int) $p['island_total'] . ' | ' . (int) $p['light_total'] . " |\n";
 		}
 		$md .= "\n";
 
@@ -326,6 +434,18 @@ final class OGM_GPDM_Audit {
 			$md .= "\n";
 		}
 
+		$field_rows = self::ranked_field_failures( $audit );
+		if ( ! empty( $field_rows ) ) {
+			$md .= "### Dark-mode form-field borders under 3:1, worst first\n\n";
+			foreach ( array_slice( $field_rows, 0, $max_rows ) as $f ) {
+				$md .= self::field_line( $f, implode( ', ', array_unique( $f['pages'] ) ) );
+			}
+			if ( count( $field_rows ) > $max_rows ) {
+				$md .= '- …and ' . ( count( $field_rows ) - $max_rows ) . " more of the same kinds.\n";
+			}
+			$md .= "\nThe plugin's own field rule uses `--field-border`; fields the plugin doesn't style take their border from the theme or a form plugin.\n\n";
+		}
+
 		$islands = array();
 		foreach ( $audit['pages'] as $p ) {
 			foreach ( $p['islands'] as $i ) {
@@ -336,7 +456,7 @@ final class OGM_GPDM_Audit {
 			$md .= "### Light panels still light in dark mode\n\n" . implode( '', array_slice( array_unique( $islands ), 0, 40 ) ) . "\nSome may be intentional (a logo plate, an ad slot's white backing) — judge from the selector.\n\n";
 		}
 
-		if ( empty( $rows ) && empty( $islands ) ) {
+		if ( empty( $rows ) && empty( $field_rows ) && empty( $islands ) ) {
 			$md .= "No dark-mode contrast failures or light panels were measured on these pages.\n\n";
 		}
 		return $md;
@@ -367,7 +487,7 @@ final class OGM_GPDM_Audit {
 		$p .= "## How dark mode works on this site\n";
 		$p .= "- Dark mode is `data-theme=\"dark\"` on `<html>`; light is `data-theme=\"light\"`. Switch with the toggle in the menu bar, or run `document.documentElement.setAttribute('data-theme','dark')` in the page.\n";
 		$p .= "- Every dark rule must be scoped `html[data-theme=\"dark\"] …`. Light mode must not change.\n";
-		$p .= "- The plugin's palette variables: --bg, --bg-2, --surface, --surface-2, --text, --text-muted, --border, --link, --dm-accent, --dm-glow.\n";
+		$p .= "- The plugin's palette variables: --bg, --bg-2, --surface, --surface-2, --text, --text-muted, --border, --field-border, --link, --dm-accent, --dm-glow. --border is for dividers; form-field borders use --field-border.\n";
 		if ( '' !== $colors ) {
 			$p .= "- GeneratePress Global Colors (light values): {$colors}. Redefining them under `html[data-theme=\"dark\"]` is the highest-leverage fix, because GeneratePress paints most of the site with them.\n";
 		}
@@ -382,7 +502,7 @@ final class OGM_GPDM_Audit {
 		$p .= "## What to do\n";
 		$p .= "1. On each page, compare light and dark mode by eye and with screenshots. Look for unreadable text, panels still light in dark mode, invisible borders and icons, and form fields, buttons, tables, code, blockquotes, menus (dropdowns and the mobile menu), widgets, comments and the footer.\n";
 		$p .= "2. Check states: hover and focus on links, buttons, menu items and form fields; dropdown menus open.\n";
-		$p .= "3. Measure: text needs 4.5:1 contrast against its actual background (3:1 for large text). Use getComputedStyle on the element and the background behind it.\n";
+		$p .= "3. Measure: text needs 4.5:1 contrast against its actual background (3:1 for large text). A form field's border needs 3:1 against both the field and the background around it (WCAG 1.4.11). Use getComputedStyle on the element and the background behind it.\n";
 		$p .= "4. Write the CSS and test it live: inject it as `<style id=\"gpdm-trial\">` in each page, re-check, and iterate until the problems are gone in both widths. Prefer redefining variables over per-selector overrides; use !important only to beat inline styles or plugin CSS. Leave images, video and ads alone (a backing color behind a transparent ad is fine).\n";
 		$p .= "5. Keep the rules in the current AI stylesheet that still work.\n\n";
 
@@ -413,6 +533,11 @@ final class OGM_GPDM_Audit {
 	private static function hex( $value ) {
 		$value = strtolower( trim( is_scalar( $value ) ? (string) $value : '' ) );
 		return preg_match( '/^#[0-9a-f]{6}$/', $value ) ? $value : '';
+	}
+
+	/** A contrast ratio from the payload, clamped to 1–21 and rounded to 2 places. */
+	private static function ratio( array $f, $key ) {
+		return round( max( 1, min( 21, (float) ( isset( $f[ $key ] ) ? $f[ $key ] : 1 ) ) ), 2 );
 	}
 
 	/** A bounded non-negative count. */

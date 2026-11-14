@@ -138,7 +138,209 @@ check( 'revcontent module: no typography in dark rules', false === strpos( $rc_c
 $fw = file_get_contents( dirname( __DIR__ ) . '/assets/css/gp-dark-mode.css' );
 check( 'framework: global text rule is dark-scoped', false !== strpos( $fw, 'html[data-theme="dark"] blockquote' ) );
 check( 'framework: no unscoped body/p/blockquote globals', ! preg_match( '~^(?:body|blockquote|p|a)\s*[,{]~m', $fw ) );
-check( 'framework: surfaces + forms dark-scoped', false !== strpos( $fw, 'html[data-theme="dark"] .site-content input' ) && ! preg_match( '~^\.site-content~m', $fw ) );
+// The Forms block (1.12.2: the base rule + the field-border rule; 1.13.1: the
+// field-border rule also reaches fields outside .site-content): every
+// selector in it is dark-scoped, and it has both rules.
+$fw_forms = preg_match( '~Forms \(dark only\)\s*=+\s*\*/(.*?)/\*\s*=+\s*Toggle component~s', $fw, $m ) ? preg_replace( '~/\*.*?\*/~s', '', $m[1] ) : '';
+preg_match_all( '~([^{}]+)\{~', $fw_forms, $m );
+$fw_form_sels = array();
+foreach ( $m[1] as $list ) {
+	foreach ( preg_split( '~,(?![^(]*\))~', $list ) as $sel ) {
+		$fw_form_sels[] = trim( $sel );
+	}
+}
+check( 'framework: surfaces + forms dark-scoped', false !== strpos( $fw, 'html[data-theme="dark"] .site-content input' ) && ! preg_match( '~^\.site-content~m', $fw ) && 9 === count( $fw_form_sels ) && count( $fw_form_sels ) === count( preg_grep( '~^html\[data-theme="dark"\] (?:\.site-content )?(?:input|textarea|select)\b~', $fw_form_sels ) ), implode( ' | ', $fw_form_sels ) );
+
+// ---- No self-referencing custom properties (1.12.1) ----
+// `--x: var(--x, fallback)` is a cycle: the property becomes invalid and the
+// fallback never applies. The framework carried the original site's
+// `--accent: var(--accent, #1d428a)` until 1.12.1. Wherever it printed AFTER
+// the theme's own --accent (non-GP themes, where the framework is a late
+// standalone sheet), it wiped the theme's accent out in both modes.
+function gpdm_self_refs( $css ) {
+	$css = preg_replace( '~/\*.*?\*/~s', '', (string) $css );
+	preg_match_all( '~(?<![\w-])(--[\w-]+)\s*:([^;{}]*)~', $css, $decls, PREG_SET_ORDER );
+	$found = array();
+	foreach ( $decls as $d ) {
+		if ( preg_match( '~var\(\s*' . preg_quote( $d[1], '~' ) . '\s*[,)]~', $d[2] ) ) {
+			$found[] = $d[1];
+		}
+	}
+	return array_values( array_unique( $found ) );
+}
+check( 'self-ref: catches the pre-1.12.1 framework line', array( '--accent' ) === gpdm_self_refs( ":root {\n\t--dm-accent: #1d428a;\n\t--accent: var(--accent, #1d428a);\n}" ) );
+check( 'self-ref: catches it inside a nested fallback and minified', array( '--link' ) === gpdm_self_refs( 'html[data-theme="dark"]{--bg:#000;--link:var(--dm-link,var(--link))}' ) );
+check( 'self-ref: other variables, longer names and comments are fine', array() === gpdm_self_refs( ":root { --accent: var(--accent-2); --a: var(--b, #fff); /* --c: var(--c); */ }\n.x { color: var(--accent); }" ) );
+$self_ref_files = array_merge( array( dirname( __DIR__ ) . '/assets/css/gp-dark-mode.css' ), glob( dirname( __DIR__ ) . '/assets/css/modules/*.css' ) );
+check( 'self-ref: scanning the framework + every module (not a vacuous pass)', count( $self_ref_files ) > 5 );
+foreach ( $self_ref_files as $css_file ) {
+	$refs = gpdm_self_refs( file_get_contents( $css_file ) );
+	check( 'self-ref: none in ' . basename( $css_file ), array() === $refs, implode( ', ', $refs ) );
+}
+check( 'framework: never defines --accent (the theme owns it)', ! preg_match( '~(?<![\w-])--accent\s*:~', preg_replace( '~/\*.*?\*/~s', '', $fw ) ) );
+
+// ---- Form-field borders (1.12.2, WCAG 2.2 SC 1.4.11 Non-text Contrast) ----
+// A text field's border is what identifies the control, so it needs 3:1
+// against the field AND the page. Found in a WCAG 2.2 AA audit: the forms
+// rule painted fields with --border (#333340, a divider color), 1.38:1 on a
+// #1b1b20 field and 1.16:1 on the framework's own --surface-2.
+
+// A token's value in the framework's :root or dark variables block.
+function gpdm_fw_token( $fw, $scope, $name ) {
+	$code = preg_replace( '~/\*.*?\*/~s', '', $fw );
+	$re   = 'root' === $scope ? '~^:root\s*\{([^}]*)\}~m' : '~^html\[data-theme="dark"\]\s*\{([^}]*)\}~m';
+	if ( ! preg_match( $re, $code, $b ) || ! preg_match( '~(?<![\w-])' . preg_quote( $name, '~' ) . '\s*:\s*([^;]+);~', $b[1], $v ) ) {
+		return null;
+	}
+	return OGM_GPDM_Palette::normalize_hex( trim( $v[1] ) );
+}
+
+// Selector specificity [a, b, c] — enough for the shipped form rules:
+// :where() counts 0; :not()/:is() count their argument (one compound here).
+function gpdm_specificity( $sel ) {
+	$spec = array( 0, 0, 0 );
+	while ( preg_match( '~:(where|not|is)\(~', $sel, $mm, PREG_OFFSET_CAPTURE ) ) {
+		$start = $mm[0][1];
+		$open  = $start + strlen( $mm[0][0] ) - 1;
+		for ( $i = $open, $depth = 0; $i < strlen( $sel ); $i++ ) {
+			if ( '(' === $sel[ $i ] ) {
+				$depth++;
+			} elseif ( ')' === $sel[ $i ] && 0 === --$depth ) {
+				break;
+			}
+		}
+		if ( 'where' !== $mm[1][0] ) {
+			$inner = gpdm_specificity( substr( $sel, $open + 1, $i - $open - 1 ) );
+			$spec  = array( $spec[0] + $inner[0], $spec[1] + $inner[1], $spec[2] + $inner[2] );
+		}
+		$sel = substr( $sel, 0, $start ) . substr( $sel, $i + 1 );
+	}
+	$spec[1] += preg_match_all( '~\[[^\]]*\]~', $sel );
+	$sel      = preg_replace( '~\[[^\]]*\]~', '', $sel );
+	$spec[0] += preg_match_all( '~#[\w-]+~', $sel );
+	$spec[1] += preg_match_all( '~\.[\w-]+~', $sel ) + preg_match_all( '~(?<!:):[\w-]+~', $sel );
+	$spec[2] += preg_match_all( '~::[\w-]+~', $sel ) + preg_match_all( '~(?:^|[\s>+\~])[a-z][\w-]*~i', $sel );
+	return $spec;
+}
+check( 'specificity helper: known values', array( 0, 2, 2 ) === gpdm_specificity( 'html[data-theme="dark"] .site-content input' ) && array( 0, 6, 2 ) === gpdm_specificity( 'html[data-theme="dark"] .site-content input:not([type="submit"]):not([type="button"]):not([type="checkbox"]):not([type="radio"])' ) && array( 0, 2, 2 ) === gpdm_specificity( 'html[data-theme="dark"] .site-content input:where(:not([type="submit"]):not(.x))' ) && array( 1, 1, 1 ) === gpdm_specificity( '#a .b c' ) );
+
+// Rules in a CSS string whose selector list includes $needle: [selectors[], body].
+function gpdm_rules_with( $css, $needle ) {
+	$css = preg_replace( '~/\*.*?\*/~s', '', $css );
+	preg_match_all( '~([^{}]+)\{([^{}]*)\}~', $css, $m, PREG_SET_ORDER );
+	$out = array();
+	foreach ( $m as $r ) {
+		$sels = array_map( 'trim', preg_split( '~,(?![^(]*\))~', $r[1] ) );
+		if ( in_array( $needle, $sels, true ) ) {
+			$out[] = array( $sels, trim( $r[2] ) );
+		}
+	}
+	return $out;
+}
+
+$fw_field = gpdm_rules_with( $fw, 'html[data-theme="dark"] .site-content textarea' );
+check( 'field border: framework has the base forms rule and a field-border rule after it', 2 === count( $fw_field ) && false !== strpos( $fw_field[0][1], 'background-color: var(--surface-2)' ) && 'border-color: var(--field-border);' === $fw_field[1][1], isset( $fw_field[1] ) ? $fw_field[1][1] : '' );
+$fw_field_sels = isset( $fw_field[1] ) ? $fw_field[1][0] : array();
+$fw_field_in   = (string) current( preg_grep( '~ \.site-content input~', $fw_field_sels ) );
+$fw_field_site = (string) current( preg_grep( '~^html\[data-theme="dark"\] input~', $fw_field_sels ) );
+check( 'field border: covers text inputs, textareas and selects', 6 === count( $fw_field_sels ) && '' !== $fw_field_in && in_array( 'html[data-theme="dark"] .site-content select', $fw_field_sels, true ) && in_array( 'html[data-theme="dark"] .site-content textarea', $fw_field_sels, true ), implode( ' | ', $fw_field_sels ) );
+check( 'field border (1.13.1): also outside the content area (header, footer, widget areas, hooks)', '' !== $fw_field_site && in_array( 'html[data-theme="dark"] textarea', $fw_field_sels, true ) && in_array( 'html[data-theme="dark"] select', $fw_field_sels, true ) );
+$excluded = array( 'submit', 'button', 'reset', 'image', 'checkbox', 'radio' );
+$all_out  = true;
+foreach ( $excluded as $type ) {
+	$all_out = $all_out && false !== strpos( $fw_field_in, ':not([type="' . $type . '"])' ) && false !== strpos( $fw_field_site, ':not([type="' . $type . '"])' );
+}
+check( 'field border: buttons (submit/button/reset/image), checkboxes and radios excluded', $all_out, $fw_field_in . ' / ' . $fw_field_site );
+check( 'field border: never the divider color on a field', false === strpos( $fw_field[1][1], 'var(--border)' ) );
+// Equal specificity: the field rule wins over the base rule by order, and a
+// Manual CSS rule with the base selector can still override it.
+check( 'field border: :where() holds the field rule at the base rule\'s specificity (0,2,2)', array( 0, 2, 2 ) === gpdm_specificity( $fw_field_in ) && array( 0, 2, 2 ) === gpdm_specificity( 'html[data-theme="dark"] .site-content input' ), implode( ',', gpdm_specificity( $fw_field_in ) ) );
+// Outside the content area the rule competes with GeneratePress's own field
+// rules (inc/css-output.php): it must beat the resting one, whose border is
+// var(--base). GP's input[type=...]:focus (0,2,1) still wins, so text inputs
+// keep GP's focus color; GP's textarea:focus and select:focus are only
+// (0,1,1), so those keep --field-border on focus (documented in the CSS).
+$spec_n = function ( $sel ) {
+	$s = gpdm_specificity( $sel );
+	return $s[0] * 10000 + $s[1] * 100 + $s[2];
+};
+check( 'field border (1.13.1): site-wide selectors beat GP\'s field rule (0,1,1), lose to its input :focus rule (0,2,1)', $spec_n( $fw_field_site ) > $spec_n( 'input[type="text"]' ) && $spec_n( 'html[data-theme="dark"] textarea' ) > $spec_n( 'textarea' ) && $spec_n( 'html[data-theme="dark"] select' ) > $spec_n( 'select' ) && $spec_n( $fw_field_site ) < $spec_n( 'input[type="text"]:focus' ) && array( 0, 1, 2 ) === gpdm_specificity( $fw_field_site ), implode( ',', gpdm_specificity( $fw_field_site ) ) );
+// ...and never outranks the content-area base rule, which sets the field
+// background there.
+check( 'field border (1.13.1): site-wide selectors stay below the content-area rules (0,2,2)', $spec_n( $fw_field_site ) < $spec_n( 'html[data-theme="dark"] .site-content input' ) );
+// Focus styles stay the theme's: the forms block sets no outline, no
+// box-shadow and no :focus rule — only colors.
+check( 'field border: focus styles intact (no outline, box-shadow or :focus in the forms block)', '' !== $fw_forms && ! preg_match( '~outline|box-shadow|:focus~', $fw_forms ) );
+
+$fb_dark  = gpdm_fw_token( $fw, 'dark', '--field-border' );
+$fb_light = gpdm_fw_token( $fw, 'root', '--field-border' );
+check( 'field border: token defined light (:root) and dark', null !== $fb_dark && null !== $fb_light );
+check( 'field border: palette constants match the framework (FIELD_BORDER, DARK_SURFACE_2, DARK_REF)', OGM_GPDM_Palette::FIELD_BORDER === $fb_dark && OGM_GPDM_Palette::DARK_SURFACE_2 === gpdm_fw_token( $fw, 'dark', '--surface-2' ) && OGM_GPDM_Palette::DARK_REF === gpdm_fw_token( $fw, 'dark', '--bg' ) );
+foreach ( array( 'dark' => $fb_dark, 'root' => $fb_light ) as $scope => $fb ) {
+	$ratios = array();
+	foreach ( array( '--bg', '--bg-2', '--surface', '--surface-2' ) as $surface ) {
+		$ratios[ $surface ] = round( OGM_GPDM_Palette::contrast_ratio( (string) $fb, (string) gpdm_fw_token( $fw, $scope, $surface ) ), 2 );
+	}
+	check( "field border: $scope --field-border >= 3:1 against --bg, --bg-2, --surface, --surface-2", null !== $fb && min( $ratios ) >= 3, json_encode( $ratios ) );
+}
+check( 'field border: the audited failure reproduces with --border (#333340 on #1b1b20 < 3:1)', OGM_GPDM_Palette::contrast_ratio( (string) gpdm_fw_token( $fw, 'dark', '--border' ), '#1b1b20' ) < 3 && OGM_GPDM_Palette::contrast_ratio( (string) $fb_dark, '#1b1b20' ) >= 3 );
+
+// Upgrades: palettes generated before 1.12.2 are stored, not recomputed. The
+// default must clear 3:1 against the brightest surfaces that generator could
+// emit — the accent-tinted --bg-2 (s <= .55, L .20) and ramp ranks 1-4
+// (s <= .30) — at every hue.
+$worst_old = 99;
+for ( $deg = 0; $deg < 360; $deg++ ) {
+	$worst_old = min( $worst_old, OGM_GPDM_Palette::contrast_ratio( (string) $fb_dark, OGM_GPDM_Palette::hsl_to_hex( $deg / 360, 0.55, 0.20 ) ) );
+	for ( $rank = 0; $rank < 4; $rank++ ) {
+		$worst_old = min( $worst_old, OGM_GPDM_Palette::contrast_ratio( (string) $fb_dark, OGM_GPDM_Palette::hsl_to_hex( $deg / 360, 0.30, 0.07 + 0.045 * $rank ) ) );
+	}
+}
+check( 'field border: default >= 3:1 on every surface a pre-1.12.2 generated palette can hold', $worst_old >= 3, round( $worst_old, 2 ) . ':1' );
+
+// The minifier keeps the :where()/:not() selector intact.
+check( 'field border: selector survives the print-time minifier', false !== strpos( OGM_GPDM_CSS::minify( $fw ), 'html[data-theme="dark"] .site-content input:where(:not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]):not([type="checkbox"]):not([type="radio"])),' ) && false !== strpos( OGM_GPDM_CSS::minify( $fw ), 'html[data-theme="dark"] input:where(:not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]):not([type="checkbox"]):not([type="radio"])),html[data-theme="dark"] textarea,' ) );
+
+// Contact Form 7's module paints its own fields (more specific than the
+// framework's rule), so it carries the same fix.
+$cf7       = file_get_contents( dirname( __DIR__ ) . '/assets/css/modules/contact-form-7.css' );
+$cf7_field = gpdm_rules_with( $cf7, 'html[data-theme="dark"] .wpcf7 textarea' );
+$cf7_in    = isset( $cf7_field[1] ) ? (string) current( preg_grep( '~ input~', $cf7_field[1][0] ) ) : '';
+$cf7_base  = isset( $cf7_field[0] ) ? (string) current( preg_grep( '~ input~', $cf7_field[0][0] ) ) : '';
+$cf7_out   = true;
+foreach ( $excluded as $type ) {
+	$cf7_out = $cf7_out && false !== strpos( $cf7_in, ':not([type="' . $type . '"])' );
+}
+check( 'cf7 module: field-border rule after the base rule, buttons/checkboxes/radios excluded', 2 === count( $cf7_field ) && 'border-color: var(--field-border);' === $cf7_field[1][1] && $cf7_out );
+check( 'cf7 module: field rule at the base rule\'s specificity (wins by order)', '' !== $cf7_in && gpdm_specificity( $cf7_in ) === gpdm_specificity( $cf7_base ), implode( ',', gpdm_specificity( $cf7_in ) ) . ' vs ' . implode( ',', gpdm_specificity( $cf7_base ) ) );
+
+// No shipped stylesheet gives a text field the divider color without a
+// --field-border rule after it for the same selector.
+$field_gaps = array();
+foreach ( $self_ref_files as $css_file ) {
+	$code = preg_replace( '~/\*.*?\*/~s', '', file_get_contents( $css_file ) );
+	preg_match_all( '~([^{}]+)\{([^{}]*)\}~', $code, $rules, PREG_SET_ORDER );
+	foreach ( $rules as $i => $r ) {
+		if ( false === strpos( $r[2], 'border-color: var(--border)' ) ) {
+			continue;
+		}
+		foreach ( array_map( 'trim', preg_split( '~,(?![^(]*\))~', $r[1] ) ) as $sel ) {
+			if ( ! preg_match( '~\b(?:textarea|select)$~', $sel ) ) {
+				continue;
+			}
+			$fixed = false;
+			foreach ( array_slice( $rules, $i + 1 ) as $later ) {
+				$fixed = $fixed || ( false !== strpos( $later[2], 'border-color: var(--field-border)' ) && in_array( $sel, array_map( 'trim', preg_split( '~,(?![^(]*\))~', $later[1] ) ), true ) );
+			}
+			if ( ! $fixed ) {
+				$field_gaps[] = basename( $css_file ) . ': ' . $sel;
+			}
+		}
+	}
+}
+check( 'field border: every shipped field rule with --border is followed by a --field-border rule', array() === $field_gaps, implode( '; ', $field_gaps ) );
+
+check( 'field border: the AI bundle contract and the Chrome prompt name --field-border', false !== strpos( file_get_contents( dirname( __DIR__ ) . '/includes/class-ogm-gpdm-bundle.php' ), '`--field-border`' ) && false !== strpos( file_get_contents( dirname( __DIR__ ) . '/includes/class-ogm-gpdm-audit.php' ), '--field-border' ) );
 
 // ---- OGM_GPDM_CSS::minify (print-time; comments + whitespace only) ----
 $m = OGM_GPDM_CSS::minify( "/* gone */\nhtml[data-theme=\"dark\"] .code-block[style*=\"position: fixed\"] .rc-headline ,\n .x > .y {\n\tcolor: #fff !important;\n\tbackground: rgba(1, 2, 3, .5);\n}\n" );
@@ -290,6 +492,18 @@ $p = OGM_GPDM_Palette::derive_palette( $gp_defaults );
 
 $l = function ( $slug ) use ( $p ) { return OGM_GPDM_Palette::hex_to_hsl( $p['map'][ $slug ]['dark'] )[2]; };
 
+// 1.13.1: outside .site-content, GeneratePress paints a field's border
+// var(--base) on a var(--base-2) fill, over var(--base-3) areas. The generated
+// palette turns all three into dark surfaces, which is the gap the site-wide
+// field-border selectors close.
+$gp_field = array( $p['map']['base']['dark'], $p['map']['base-2']['dark'], $p['map']['base-3']['dark'] );
+check( 'field border (1.13.1): GP\'s own field border under the generated palette reproduces the gap (< 3:1)', OGM_GPDM_Palette::contrast_ratio( $gp_field[0], $gp_field[1] ) < 3 && OGM_GPDM_Palette::contrast_ratio( $gp_field[0], $gp_field[2] ) < 3, round( OGM_GPDM_Palette::contrast_ratio( $gp_field[0], $gp_field[1] ), 2 ) . ':1' );
+$gp_fixed = array();
+foreach ( $gp_field as $surface ) {
+	$gp_fixed[] = round( OGM_GPDM_Palette::contrast_ratio( OGM_GPDM_Palette::FIELD_BORDER, $surface ), 2 );
+}
+check( 'field border (1.13.1): --field-border clears 3:1 on GP\'s generated field, page and area colors', min( $gp_fixed ) >= 3, implode( ' / ', $gp_fixed ) );
+
 check( 'ramp: all three surfaces derived', isset( $p['map']['base'], $p['map']['base-2'], $p['map']['base-3'] ) );
 check( 'ramp: surfaces pairwise distinct', abs( $l('base') - $l('base-2') ) >= 0.03 && abs( $l('base-2') - $l('base-3') ) >= 0.03 );
 check( 'ramp: surface ordering inverted (lightest -> darkest)', $l('base-3') < $l('base-2') && $l('base-2') < $l('base') );
@@ -429,6 +643,32 @@ $none = OGM_GPDM_Palette::derive_tokens( $afs_p, null );
 check( 'tokens: no accent -> no toggle/link tokens', array() === $none['root'] && ! isset( $none['dark']['--link'] ) && ! isset( $none['dark']['--dm-glow'] ) && false !== strpos( implode( '|', $none['notes'] ), 'no accent found' ) );
 check( 'tokens: no accent -> --bg-2 still from rank 2', $rank2 === $none['dark']['--bg-2'][0] );
 
+// ---- --field-border from the generator (1.12.2) ----
+// Emitted only when the framework's value is under 3:1 against a palette's
+// dark surfaces or the field background; otherwise a note with the lowest ratio.
+check( 'field_border: framework surfaces -> the framework value, unchanged', array( OGM_GPDM_Palette::FIELD_BORDER ) === array_slice( OGM_GPDM_Palette::field_border( array( OGM_GPDM_Palette::DARK_REF, OGM_GPDM_Palette::DARK_SURFACE_2 ) ), 0, 1 ) );
+$gp_t = OGM_GPDM_Palette::derive_tokens( $p, OGM_GPDM_Palette::find_accent( $gp_defaults, array() ) );
+check( 'field_border: GP default palette keeps the framework value (note, no token)', ! isset( $gp_t['dark']['--field-border'] ) && (bool) preg_grep( '~^Form-field borders: .*' . OGM_GPDM_Palette::FIELD_BORDER . '.* reaches [0-9.]+:1~', $gp_t['notes'] ) );
+check( 'field_border: AFS, one-surface and no-accent palettes keep it too', ! isset( $t['dark']['--field-border'] ) && ! isset( $one['dark']['--field-border'] ) && ! isset( $none['dark']['--field-border'] ) && (bool) preg_grep( '~^Form-field borders~', $none['notes'] ) );
+// Built-in accent: still nothing emitted (that test above), but checked.
+check( 'field_border: built-in accent palette checked as well (note)', (bool) preg_grep( '~^Form-field borders~', $ref_t['notes'] ) );
+// Stress case: six light surfaces with a yellow cast ramp up to L 0.295.
+$six = array();
+foreach ( array( '#fffff0', '#fbfbe8', '#f7f7e0', '#f3f3d8', '#efefd0', '#ebebc8' ) as $i => $hex ) {
+	$six[] = array( 'slug' => 'base-' . ( $i + 1 ), 'color' => $hex );
+}
+$six[]  = array( 'slug' => 'accent', 'color' => '#1e73be' );
+$six_p  = OGM_GPDM_Palette::derive_palette( $six );
+$six_t  = OGM_GPDM_Palette::derive_tokens( $six_p, OGM_GPDM_Palette::find_accent( $six, array() ) );
+$six_fb = isset( $six_t['dark']['--field-border'] ) ? $six_t['dark']['--field-border'][0] : null;
+$six_lo = 99;
+foreach ( array_merge( array( OGM_GPDM_Palette::DARK_REF, $six_t['dark']['--surface-2'][0] ), array_map( function ( $slug ) use ( $six_p ) { return $six_p['map'][ $slug ]['dark']; }, $six_p['surfaces'] ) ) as $ref ) {
+	$six_lo = min( $six_lo, OGM_GPDM_Palette::contrast_ratio( (string) $six_fb, $ref ) );
+}
+check( 'field_border: bright ramp -> --field-border emitted, >= 3:1 on every dark surface and the field', 6 === count( $six_p['surfaces'] ) && null !== $six_fb && $six_lo >= 3, $six_fb . ' lowest ' . round( $six_lo, 2 ) );
+check( 'field_border: lightened in the framework value\'s own hue', null !== $six_fb && abs( OGM_GPDM_Palette::hex_to_hsl( $six_fb )[0] - OGM_GPDM_Palette::hex_to_hsl( OGM_GPDM_Palette::FIELD_BORDER )[0] ) < 0.02 && OGM_GPDM_Palette::hex_to_hsl( $six_fb )[2] > OGM_GPDM_Palette::hex_to_hsl( OGM_GPDM_Palette::FIELD_BORDER )[2] );
+check( 'field_border: emitted note says lowest ratio without overclaiming', null !== $six_fb && preg_match( '~lowest ([0-9.]+):1~', $six_t['dark']['--field-border'][1], $lo_m ) && (float) $lo_m[1] <= $six_lo && (float) $lo_m[1] >= 3 );
+
 // The framework's hover glows are now one variable; its built-in values
 // must stay exactly the old literals (upgrades render pixel-identically).
 check( 'framework: hover glows use --dm-glow', 2 === substr_count( $fw, 'inset 0 0 0 20px var(--dm-glow)' ) && false === strpos( $fw, '20px #0056ff' ) && false === strpos( $fw, '20px #122666' ) );
@@ -515,6 +755,17 @@ check( 'gp surfaces: slugs the generated palette remaps are left to it', '' === 
 $odd = OGM_GPDM_Palette::gp_surfaces_css( array( 'header_background_color' => 'linear-gradient(#fff,#eee)', 'footer_background_color' => 'var(--nope)', 'footer_widget_background_color' => 'var(--base-3, #fff)', 'content_background_color' => '' ), $gp_colors );
 check( 'gp surfaces: gradients, unknown slugs and empty values skipped; var() fallbacks resolved', false === strpos( $odd, '.site-header' ) && false === strpos( $odd, '.site-info' ) && false !== strpos( $odd, '.footer-widgets' ) && false === strpos( $odd, 'inside-article' ) );
 check( 'gp surfaces: no settings → nothing', '' === OGM_GPDM_Palette::gp_surfaces_css( array(), $gp_colors ) );
+
+// Generated CSS (tokens + GP surfaces) must not self-reference either.
+$gen_css = $vanilla . $brand . $odd;
+foreach ( array( $t, $near, $one, $none ) as $tok ) {
+	foreach ( array( 'root', 'dark' ) as $scope ) {
+		foreach ( $tok[ $scope ] as $name => $val ) {
+			$gen_css .= "\n:root{" . $name . ':' . $val[0] . '}';
+		}
+	}
+}
+check( 'self-ref: none in generated tokens + GP surface CSS', '' !== trim( $gen_css ) && array() === gpdm_self_refs( $gen_css ), implode( ', ', gpdm_self_refs( $gen_css ) ) );
 check( 'palette slugs: parsed from generated CSS', array( 'base-3', 'contrast', 'bg-2' ) === OGM_GPDM_Palette::palette_slugs( "html[data-theme=\"dark\"] {\n --base-3: #121212;\n --contrast: #eee;\n --bg-2:#111; color: var(--base);\n}" ) );
 
 check( 'seed models: current lineups, defaults lead each list', 'claude-opus-5-5' === OGM_GPDM_AI::seed_models( 'anthropic' )[0] && 'gpt-6.1-sol' === OGM_GPDM_AI::seed_models( 'openai' )[0] && $prov['anthropic']['default_model'] === OGM_GPDM_AI::seed_models( 'anthropic' )[0] && $prov['openai']['default_model'] === OGM_GPDM_AI::seed_models( 'openai' )[0] );

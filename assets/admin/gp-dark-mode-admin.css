@@ -445,6 +445,13 @@ a.button.ogm-gpdm-danger-btn:hover {
 	font-weight: 600;
 	text-align: center;
 }
+.ogm-gpdm-swatch-field { /* a form field: its fill, its border, the color around it (box-shadow ring) */
+	width: 2.4em;
+	height: 1.2em;
+	margin: 5px 8px; /* room for the 4px ring, so rows don't touch */
+	border-width: 2px;
+	vertical-align: middle;
+}
 .ogm-gpdm-steps {
 	margin-left: 1.4em;
 }

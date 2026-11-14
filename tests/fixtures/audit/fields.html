@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>Form-field border fixture</title>
+<style>
+/* Light: the theme's fields. Dark: the plugin's --field-border level (#9a9aa6) on #1b1b20 fields over #0f0f12. */
+body { margin: 0; background: #fff; color: #222; font: 16px/1.5 sans-serif; }
+html[data-theme="dark"] body { background: #0f0f12; color: #e8e8ec; }
+.wrap { padding: 20px; }
+input, textarea, select { display: block; margin: 8px 0; padding: 6px; border: 1px solid #767676; background: #fff; color: #222; }
+html[data-theme="dark"] input, html[data-theme="dark"] textarea, html[data-theme="dark"] select { background: #1b1b20; color: #e8e8ec; border-color: #9a9aa6; }
+
+/* FAIL: the divider color on a field (1.38:1 / 1.54:1). */
+html[data-theme="dark"] #divider-field { border-color: #333340; }
+/* FAIL on focus only. */
+html[data-theme="dark"] #focus-bad:focus { border-color: #2a2a30; }
+/* FAIL in both modes: the site's own design. */
+#both-modes { border-color: #e0e0e0; }
+html[data-theme="dark"] #both-modes { border-color: #2a2a2e; }
+/* FAIL: a translucent border, measured as composited over the field. */
+html[data-theme="dark"] #translucent { border-color: rgba(255, 255, 255, .12); }
+/* FAIL: sample must come from the name, never the typed value. */
+html[data-theme="dark"] #value-field { border-color: #333340; }
+
+/* PASS: only the bottom border is visible, and it's strong. */
+#underline { border: 0; border-bottom: 2px solid #767676; }
+html[data-theme="dark"] #underline { border-bottom-color: #9a9aa6; }
+/* PASS: weak sides, but one strong side (the bottom) identifies the field. */
+html[data-theme="dark"] #mixed-sides { border-color: #333340; border-bottom: 2px solid #9a9aa6; }
+/* PASS: weak border, but the fill itself stands out from the page. */
+html[data-theme="dark"] #light-field { background: #d0d0d8; border-color: #c8c8d0; color: #111; }
+/* SKIPPED: no border at all. */
+#no-border { border: 0; background: #f0f0f0; }
+html[data-theme="dark"] #no-border { background: #1b1b20; }
+/* OUT OF SCOPE: buttons and checkboxes, even with weak borders. */
+html[data-theme="dark"] input[type="submit"], html[data-theme="dark"] input[type="checkbox"] { border-color: #222226; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<form>
+	<input id="ok-text" type="text" placeholder="Name">
+	<input id="divider-field" type="email" placeholder="Your email">
+	<input id="focus-bad" type="search" aria-label="Search">
+	<textarea id="both-modes" name="message"></textarea>
+	<input id="translucent" type="text" placeholder="Translucent">
+	<input id="value-field" type="text" name="token" value="private-value-xyz">
+	<input id="underline" type="text" placeholder="Underline">
+	<input id="mixed-sides" type="text" placeholder="Mixed sides">
+	<input id="light-field" type="text" placeholder="Light field">
+	<input id="no-border" type="text" placeholder="No border">
+	<select id="sel"><option>One</option></select>
+	<input type="submit" value="Send">
+	<input type="checkbox" id="cb">
+	<input type="hidden" name="h" value="hidden-value">
+</form>
+</div>
+</body>
+</html>

@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Contrast check harness</title></head>
+<body>
+<pre id="out">pending</pre>
+<script src="../../../assets/admin/gp-dark-mode-audit.js"></script>
+<script>
+// Run by tests/browser.php: headless Chrome dumps the DOM once the check is done.
+window.OGM_GPDM_AUDIT.run( [
+	{ url: new URL( 'fields.html', location.href ).href, label: 'Fields' },
+	{ url: new URL( 'gp-outside.html', location.href ).href, label: 'GeneratePress outside content' }
+] ).then( function ( r ) {
+	document.getElementById( 'out' ).textContent = 'RESULT ' + JSON.stringify( r );
+}, function ( e ) {
+	document.getElementById( 'out' ).textContent = 'ERROR ' + e;
+} );
+</script>
+</body>
+</html>

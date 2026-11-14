@@ -668,7 +668,10 @@ final class OGM_GPDM_AI {
 				. "text must reach 4.5:1 against its actual background (3:1 for large text). When many failures share a cause, fix the "
 				. "cause (a Global Color or palette variable) rather than each selector. Failures marked 'also fails in light mode' are the "
 				. "site's own design — fix them in dark mode only if that's simple. Light panels: darken them unless the selector shows "
-				. "they're intentional (a logo plate, an ad slot's backing).\n\n";
+				. "they're intentional (a logo plate, an ad slot's backing). Form-field borders (1.13.0, listed when measured): a field's "
+				. "border must reach 3:1 against both the field's own fill and the background around it, at rest and on focus (a field "
+				. "whose fill alone reaches 3:1 against the background passes; borderless fields aren't measured). Fix them through "
+				. "--field-border, or through the variable the site's field rules use, rather than per selector.\n\n";
 		}
 
 		$instructions = trim( (string) $instructions );

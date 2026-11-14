@@ -892,11 +892,12 @@ final class OGM_GPDM_Bundle {
 		} else {
 			$md .= "- **GeneratePress was NOT detected on this site.** The framework + Additional CSS load as a LATE standalone stylesheet instead, so the plugin's rules win specificity ties against the theme's — the reverse of the GeneratePress cascade described in the plugin's docs.\n";
 		}
-		$md .= "- The plugin's palette tokens are `--bg`, `--bg-2`, `--surface`, `--surface-2`, `--text`, `--text-muted`, `--border`, `--link`, `--dm-accent`, `--dm-glow` (light values on `:root`, dark values on `html[data-theme=\"dark\"]`). The generated palette (Layer 2) may redefine `--dm-accent`, `--dm-glow`, `--link`, `--bg-2` and `--surface-2` from the site's accent and surfaces.\n";
+		$md .= "- The plugin's palette tokens are `--bg`, `--bg-2`, `--surface`, `--surface-2`, `--text`, `--text-muted`, `--border`, `--field-border`, `--link`, `--dm-accent`, `--dm-glow` (light values on `:root`, dark values on `html[data-theme=\"dark\"]`). The generated palette (Layer 2) may redefine `--dm-accent`, `--dm-glow`, `--link`, `--bg-2`, `--surface-2` and `--field-border` from the site's accent and surfaces.\n";
+		$md .= "- `--border` is for dividers. Form-field borders (text inputs, textareas, selects) use `--field-border`, which must stay at 3:1 or more against the field background and the page (WCAG 1.4.11 non-text contrast). Never give a field `--border`; if you darken a surface, check the field border against it.\n";
 		$md .= "- GeneratePress's own Global Color variables may also be redefined under `html[data-theme=\"dark\"]` — high leverage, since GP paints most chrome with them.\n";
 		$md .= "- Deliverable: a COMPLETE replacement for the **Current AI stylesheet** (Layer 4a) section only. The **Manual CSS** (Layer 4b) is the owner's layer — it loads after yours and always wins; treat it as read-only context. Never propose edits to theme files.\n";
 		$md .= "- The static CSS below shows what is *written*, not what *wins* the cascade. Mark any proposal that depends on specificity or cascade order as needing visual verification.\n";
-		$md .= "- Section 6, when present, is different: contrast MEASURED in a browser with the current dark mode applied — what actually wins. Fix every dark-mode failure and light panel it lists.\n";
+		$md .= "- Section 6, when present, is different: contrast MEASURED in a browser with the current dark mode applied — what actually wins. Fix every dark-mode failure, form-field border under 3:1 and light panel it lists.\n";
 		$md .= "- Stylesheets in this bundle are reduced to color-relevant declarations (best-effort); `@keyframes`/`@font-face` and layout properties are omitted on purpose.\n\n";
 
 		$md .= "## 1. Site\n\n" . self::fence( self::json( $meta ), 'json' );

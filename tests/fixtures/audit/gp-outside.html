@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<title>GeneratePress fields outside the content area</title>
+<style>
+/* GeneratePress 3.6 Global Colors (defaults). */
+:root { --contrast: #222222; --contrast-2: #575760; --contrast-3: #b2b2be; --base: #f0f0f0; --base-2: #f7f8f9; --base-3: #ffffff; --accent: #1e73be; }
+</style>
+<!-- Layer 1, printed before GP's dynamic CSS (as on a GeneratePress site). -->
+<link rel="stylesheet" href="../../../assets/css/gp-dark-mode.css">
+<style>
+/* GeneratePress's own CSS for these elements: main.css field box, then the
+   dynamic CSS from inc/css-output.php with its default colors. */
+body { margin: 0; font: 16px/1.5 sans-serif; background-color: var(--base-2); color: var(--contrast); }
+input[type=email], input[type=search], input[type=text], select, textarea { border: 1px solid; border-radius: 0; padding: 10px 15px; max-width: 100%; display: block; margin: 8px 0; }
+.site-header, .inside-article, .footer-widgets { background-color: var(--base-3); padding: 20px; }
+.navigation-search input[type="search"] { outline: 0; border: 0; }
+input[type="text"],input[type="email"],input[type="url"],input[type="password"],input[type="search"],input[type="tel"],input[type="number"],textarea,select { color: var(--contrast); background-color: var(--base-2); border-color: var(--base); }
+input[type="text"]:focus,input[type="email"]:focus,input[type="url"]:focus,input[type="password"]:focus,input[type="search"]:focus,input[type="tel"]:focus,input[type="number"]:focus,textarea:focus,select:focus { color: var(--contrast); background-color: var(--base-2); border-color: var(--contrast-3); }
+</style>
+<style>
+/* Layer 2: the generated palette for GP's default Global Colors. */
+html[data-theme="dark"] { --base-3: #121212; --base-2: #191d22; --base: #292929; --contrast: #ebebeb; --contrast-2: #cfcfd3; }
+</style>
+</head>
+<body>
+<header class="site-header">
+	<div class="header-widget"><aside class="widget widget_search"><form class="search-form"><input type="search" id="header-search" class="search-field" placeholder="Search the site"></form></aside></div>
+</header>
+<nav class="main-navigation"><div class="navigation-search"><input type="search" id="nav-search" placeholder="Navigation search"></div></nav>
+<div class="site grid-container container" id="page">
+	<div class="site-content" id="content">
+		<main><article><div class="inside-article"><input type="email" id="content-email" placeholder="Email in the content area"></div></article></main>
+	</div>
+</div>
+<div class="site-footer">
+	<div class="footer-widgets">
+		<input type="email" id="footer-email" placeholder="Newsletter email">
+		<textarea id="footer-message" name="footer-message"></textarea>
+		<select id="footer-archives" name="archive-dropdown"><option>Archives</option></select>
+	</div>
+</div>
+</body>
+</html>

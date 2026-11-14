@@ -34,4 +34,16 @@ if command -v node >/dev/null 2>&1; then
 else
 	echo "(node not found — skipped the script syntax checks)"
 fi
+# 1.13.0: the contrast-check engine in a real browser. Optional — browser.php
+# prints "(skipped: …)" and exits 0 when no Chrome/Chromium is installed.
+echo "=== browser.php ==="
+out=$(php browser.php) || { printf '%s\n' "$out"; echo "FAIL: browser.php"; exit 1; }
+printf '%s\n' "$out"
+case "$out" in
+	*" passed, 0 failed"*|*"(skipped:"*) ;;
+	*)
+		echo "FAIL: browser.php did not print its pass marker — did it exit early?"
+		exit 1
+		;;
+esac
 echo "All suites passed."

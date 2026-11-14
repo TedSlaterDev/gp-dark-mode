@@ -17,6 +17,16 @@ html[data-theme="dark"] .wpcf7 select {
 	border-color: var(--border);
 }
 
+/* Field borders (1.12.2): --field-border, 3:1 against the field and the
+   page (WCAG 1.4.11), as in the framework. This selector has the same
+   specificity as the rule above and wins by order. Checkboxes and radios
+   keep --border. */
+html[data-theme="dark"] .wpcf7 input:not([type="submit"]):not([type="button"]):where(:not([type="reset"]):not([type="image"]):not([type="checkbox"]):not([type="radio"])),
+html[data-theme="dark"] .wpcf7 textarea,
+html[data-theme="dark"] .wpcf7 select {
+	border-color: var(--field-border);
+}
+
 html[data-theme="dark"] .wpcf7 .wpcf7-response-output {
 	color: var(--text);
 	border-color: var(--border);

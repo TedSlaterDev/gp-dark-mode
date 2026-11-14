@@ -24,7 +24,13 @@ html.theme-init * {
 	--surface-2: #f7f8f9;
 	--text: #222222;
 	--text-muted: #575760;
-	--border: #d0d0d7;
+	--border: #d0d0d7;       /* dividers: rules, table cells, quotes */
+	/* Form-field borders (1.12.2). A text field's border is what identifies
+	   the control, so it needs 3:1 against the field and the page (WCAG
+	   1.4.11). --border is a divider color and far too faint for that.
+	   Only dark mode uses this token (the framework is inert in light mode);
+	   the light value keeps the pair complete for anyone who uses it. */
+	--field-border: #767680;
 	--link: #1d428a;
 
 	/* Toggle accent (the track color) and its hover glow. The generated
@@ -32,15 +38,15 @@ html.theme-init * {
 	--dm-accent: #1d428a;
 	--dm-glow: #0056ff;
 
-	/* Carried over verbatim from the original site CSS. Self-referential —
-	   but NOT necessarily invalid: this sheet prints inline on generate-style
-	   BEFORE GeneratePress's customizer dynamic CSS, so when GP defines
-	   --accent (its Global Colors usually do) that later declaration wins
-	   and --accent stays valid. Only on a theme that never defines --accent
-	   does the self-reference become an invalid cycle (var(--accent) then
-	   falls back / computes to initial). The plugin's own styling uses
-	   --dm-accent and is unaffected either way. */
-	--accent: var(--accent, #1d428a);
+	/* The plugin never defines --accent; that is the theme's variable (GP
+	   Global Colors). Until 1.12.1 this block carried the original site's
+	   `--accent: var(--accent, #1d428a)`. A custom property that refers to
+	   itself is a cycle, so it is invalid and its fallback never applies.
+	   When that declaration came LATER in the cascade than the theme's own
+	   --accent, it wiped the theme's accent out in light AND dark mode. That
+	   happened on non-GP themes, where this sheet loads after the theme's.
+	   It only ever "worked" when GP redefined --accent after it.
+	   tests/unit.php fails on any self-referencing custom property. */
 }
 
 /* =========================
@@ -54,6 +60,11 @@ html[data-theme="dark"] {
 	--text: #f0f0f0;
 	--text-muted: #b2b2be;
 	--border: #333340;
+	/* 5.19:1 or more against every dark surface above. It also clears 3:1
+	   against the brightest surfaces a generated palette from before 1.12.2
+	   can hold, so those sites pass without regenerating. The generator
+	   lightens it when a palette's surfaces need more. */
+	--field-border: #9a9aa6;
 	--link: #9ad;
 	--dm-glow: #122666;
 }
@@ -102,6 +113,30 @@ html[data-theme="dark"] .site-content select {
 	background-color: var(--surface-2);
 	color: var(--text);
 	border-color: var(--border);
+}
+
+/* Text fields, textareas and selects take --field-border instead of the
+   divider color (1.12.2, WCAG 1.4.11). Buttons, checkboxes and radios keep
+   --border. Only the border color changes: outlines and focus rings are
+   left to the theme.
+   The first three selectors (1.13.1) reach fields outside the content area:
+   widget areas in the header, top bar, footer and off-canvas panel, page
+   heroes, hook elements. GeneratePress paints those borders var(--base),
+   which a generated palette turns into a dark surface (1.16:1 on GP's
+   default colors). At (0,1,2) they beat GP's field rule (0,1,1). GP's
+   input:focus rule (0,2,1) still wins, so text inputs keep GP's focus
+   color; its textarea:focus and select:focus are (0,1,1), so those keep
+   --field-border when focused, as every field inside .site-content does.
+   The last three match the rule above at (0,2,2) and win by order. The
+   :where() adds no specificity, so a Manual CSS rule with the same selector
+   still overrides either group. */
+html[data-theme="dark"] input:where(:not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]):not([type="checkbox"]):not([type="radio"])),
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] select,
+html[data-theme="dark"] .site-content input:where(:not([type="submit"]):not([type="button"]):not([type="reset"]):not([type="image"]):not([type="checkbox"]):not([type="radio"])),
+html[data-theme="dark"] .site-content textarea,
+html[data-theme="dark"] .site-content select {
+	border-color: var(--field-border);
 }
 
 /* =========================
